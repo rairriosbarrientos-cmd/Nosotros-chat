@@ -51,7 +51,7 @@ export default function LoginPage() {
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src="/icon-192.png" alt="" className="login-logo" width={96} height={96} />
       <h1>{APP_NAME}</h1>
-      <p className="login-sub">Solo para nosotros dos</p>
+      <p className="login-sub">Tus chats privados 💜</p>
       <form onSubmit={submit} className="login-form">
         <input
           type="email"
