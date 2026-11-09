@@ -6,6 +6,7 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import QuickSheet, { type QuickPick } from './QuickSheet';
 import CapsuleSheet, { type CapsuleDraft } from './CapsuleSheet';
 import ThemeSheet from './ThemeSheet';
+import Wall from './Wall';
 import ActionSheet from './ActionSheet';
 import Bubble, { type Msg } from './Bubble';
 import Composer from './Composer';
@@ -1098,7 +1099,7 @@ export default function Chat({
   return (
     <div className="app" data-theme={look.theme} data-wall={look.wall}>
       <div className="aurora" />
-      <div className="wall" />
+      <Wall id={look.wall} />
 
       <header className="top">
         {onBack && (

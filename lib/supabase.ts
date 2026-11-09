@@ -56,12 +56,32 @@ export const THEMES = [
   { id: 'sunset', name: 'Atardecer', a: '#ff8a3d', b: '#e5426b' },
   { id: 'mono', name: 'Noche', a: '#9aa4b8', b: '#5b6478' },
   { id: 'gold', name: 'Dorado', a: '#f5c451', b: '#d9822b' },
+  { id: 'gara', name: 'GARA', a: '#f3d999', b: '#8c6a32' },
 ] as const;
 export const WALLS = [
-  { id: 'none', name: 'Liso' },
-  { id: 'dots', name: 'Puntos' },
+  { id: 'none', name: 'Aurora' },
+  { id: 'gara', name: 'GARA' },
+  { id: 'stars', name: 'Estrellas' },
+  { id: 'nebula', name: 'Galaxia' },
+  { id: 'synth', name: 'Synthwave' },
+  { id: 'petals', name: 'Sakura' },
+  { id: 'bokeh', name: 'Luces' },
   { id: 'hearts', name: 'Corazones' },
+  { id: 'rain', name: 'Lluvia' },
+  { id: 'fireflies', name: 'Luciérnagas' },
+  { id: 'dots', name: 'Puntos' },
   { id: 'lines', name: 'Líneas' },
+] as const;
+
+export const COMBOS = [
+  { name: 'GARA 🖤', theme: 'gara', wall: 'gara' },
+  { name: 'Noche estrellada', theme: 'ocean', wall: 'stars' },
+  { name: 'Synthwave', theme: 'sunset', wall: 'synth' },
+  { name: 'Sakura', theme: 'rose', wall: 'petals' },
+  { name: 'Luciérnagas', theme: 'forest', wall: 'fireflies' },
+  { name: 'Galaxia', theme: 'aurora', wall: 'nebula' },
+  { name: 'Lluvia', theme: 'mono', wall: 'rain' },
+  { name: 'Amor', theme: 'rose', wall: 'hearts' },
 ] as const;
 
 export type Story = {

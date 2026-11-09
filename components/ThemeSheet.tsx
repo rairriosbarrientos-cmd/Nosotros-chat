@@ -1,6 +1,7 @@
 'use client';
 
-import { THEMES, WALLS } from '@/lib/supabase';
+import { COMBOS, THEMES, WALLS } from '@/lib/supabase';
+import Wall from './Wall';
 
 export default function ThemeSheet({
   theme,
@@ -17,8 +18,30 @@ export default function ThemeSheet({
     <div className="sheet-back" onClick={onClose}>
       <div className="sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Tema del chat">
         <div className="sheet-grab" />
-        <h2 className="sheet-title">Tema de este chat 🎨</h2>
-        <p className="sheet-sub">Solo lo ves tú. Cada chat puede tener su propio estilo.</p>
+        <h2 className="sheet-title">Estilo de este chat 🎨</h2>
+        <p className="sheet-sub">Solo lo ves tú. Cada chat puede tener el suyo.</p>
+
+        <p className="sheet-sub">Combos</p>
+        <div className="combo-row">
+          {COMBOS.map((c) => (
+            <button
+              key={c.name}
+              className={`combo ${theme === c.theme && wall === c.wall ? 'on' : ''}`}
+              onClick={() => onChange(c.theme, c.wall)}
+            >
+              <div className="tile" data-theme={c.theme}>
+                <Wall id={c.wall} mini />
+                <div className="tile-bubbles">
+                  <i />
+                  <i />
+                </div>
+              </div>
+              <small>{c.name}</small>
+            </button>
+          ))}
+        </div>
+
+        <p className="sheet-sub">Colores</p>
         <div className="theme-grid">
           {THEMES.map((t) => (
             <button
@@ -32,14 +55,20 @@ export default function ThemeSheet({
             </button>
           ))}
         </div>
+
         <p className="sheet-sub">Fondo</p>
-        <div className="chips">
+        <div className="wall-grid">
           {WALLS.map((w) => (
-            <button key={w.id} className={`chip ${wall === w.id ? 'on' : ''}`} onClick={() => onChange(theme, w.id)}>
-              {w.name}
+            <button key={w.id} className={`wall-pick ${wall === w.id ? 'on' : ''}`} onClick={() => onChange(theme, w.id)}>
+              <div className="tile">
+                {w.id === 'none' && <div className="aurora" />}
+                <Wall id={w.id} mini />
+              </div>
+              <small>{w.name}</small>
             </button>
           ))}
         </div>
+
         <div className="sheet-actions">
           <button className="btn" onClick={onClose}>
             Listo
