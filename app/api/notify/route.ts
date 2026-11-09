@@ -10,6 +10,8 @@ function preview(kind: string, body: string | null): string {
   if (kind === 'image') return '📷 Foto';
   if (kind === 'audio') return '🎤 Nota de voz';
   if (kind === 'ping') return '💜 Está pensando en ti';
+  if (kind === 'capsule') return '🎁 Te dejó una cápsula del tiempo';
+  if (kind === 'promise') return `⏳ ${(body ?? '').slice(0, 120)}`;
   const text = (body ?? '').trim();
   return text.length > 140 ? `${text.slice(0, 137)}…` : text;
 }

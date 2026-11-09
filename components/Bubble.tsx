@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, type PointerEvent as RPointerEvent, type TouchEvent as RTouchEvent } from 'react';
 import AudioPlayer from './AudioPlayer';
+import CapsuleCard from './CapsuleCard';
 import { isEmojiOnly, snippet } from '@/lib/emoji';
 import { useSignedUrl } from '@/lib/media';
 import type { Message, Reaction } from '@/lib/supabase';
@@ -50,6 +51,7 @@ type Props = {
   reactions: Reaction[];
   flash: boolean;
   reminded?: boolean;
+  promiseState?: 'pending' | 'done' | 'late';
   onRetry: (id: string) => void;
   onReply: (m: Msg) => void;
   onActions: (m: Msg) => void;
@@ -192,6 +194,20 @@ export default function Bubble(p: Props) {
     );
   }
 
+  // ───────── Aviso rápido (voy en camino, ya llegué…) ─────────
+  if (msg.kind === 'quick') {
+    return (
+      <div className="row ping-row" id={`msg-${msg.id}`}>
+        <div className="ping quick">
+          <span>
+            <b>{mine ? 'Tú' : p.partnerName}</b> · {msg.body}
+          </span>
+          <span className="ping-time">{time(msg.created_at)}</span>
+        </div>
+      </div>
+    );
+  }
+
   const emojiOnly = msg.kind === 'text' && isEmojiOnly(msg.body);
   const isImage = msg.kind === 'image';
 
@@ -233,6 +249,34 @@ export default function Bubble(p: Props) {
           </button>
         ) : null}
 
+        {msg.kind === 'promise' && (
+          <div className={`promise ${p.promiseState ?? 'pending'}`}>
+            <span className="promise-icon">{p.promiseState === 'done' ? '✅' : p.promiseState === 'late' ? '⌛' : '⏳'}</span>
+            <span className="promise-main">
+              <span className="promise-text">{msg.body}</span>
+              <span className="promise-state">
+                {p.promiseState === 'done'
+                  ? 'Cumplida'
+                  : p.promiseState === 'late'
+                    ? mine
+                      ? 'Ya toca contestar'
+                      : 'Se pasó de hora'
+                    : mine
+                      ? 'Te lo voy a recordar'
+                      : 'Pendiente'}
+              </span>
+            </span>
+          </div>
+        )}
+        {msg.kind === 'capsule' && (
+          <CapsuleCard
+            msg={msg}
+            mine={mine}
+            partnerName={p.partnerName}
+            onOpenImage={(url) => p.onOpenImage(url, msg)}
+            onLoaded={p.onMediaLoaded}
+          />
+        )}
         {msg.kind === 'text' && <span className={`text ${emojiOnly ? 'emoji-big' : ''}`}>{msg.body}</span>}
         {isImage && <ImageMsg path={msg.media_path} localUrl={msg.localUrl} onLoaded={p.onMediaLoaded} />}
         {msg.kind === 'audio' && (

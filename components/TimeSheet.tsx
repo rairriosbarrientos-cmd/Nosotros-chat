@@ -38,7 +38,9 @@ export default function TimeSheet({
   confirmLabel,
   onPick,
   onClose,
+  long,
 }: {
+  long?: boolean;
   title: string;
   sub: string;
   confirmLabel: string;
@@ -46,6 +48,21 @@ export default function TimeSheet({
   onClose: () => void;
 }) {
   const presets = useMemo<Preset[]>(() => {
+    if (long) {
+      const inDays = (d: number) => () => {
+        const x = new Date();
+        x.setDate(x.getDate() + d);
+        x.setHours(9, 0, 0, 0);
+        return x;
+      };
+      return [
+        { label: 'Mañana', at: inDays(1) },
+        { label: 'En 1 semana', at: inDays(7) },
+        { label: 'En 1 mes', at: inDays(30) },
+        { label: 'En 6 meses', at: inDays(182) },
+        { label: 'En 1 año', at: inDays(365) },
+      ];
+    }
     const list: Preset[] = [
       { label: 'En 30 min', at: () => new Date(Date.now() + 30 * 60_000) },
       { label: 'En 1 hora', at: () => new Date(Date.now() + 60 * 60_000) },
@@ -55,7 +72,7 @@ export default function TimeSheet({
     list.push({ label: 'Mañana 9:00 am', at: () => tomorrow(9) });
     list.push({ label: 'Mañana 6:00 pm', at: () => tomorrow(18) });
     return list;
-  }, []);
+  }, [long]);
 
   const [picked, setPicked] = useState<number | null>(null);
   const [custom, setCustom] = useState('');

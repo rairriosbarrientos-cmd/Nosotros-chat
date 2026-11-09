@@ -1775,3 +1775,178 @@ button.av:active {
 .chat-badge.muted {
   background: rgba(255, 255, 255, 0.18);
 }
+
+/* ───────── v7: avisos rápidos, promesas, cápsulas, temas ───────── */
+:root {
+  --au1: rgba(139, 92, 246, 0.55);
+  --au2: rgba(255, 107, 139, 0.4);
+}
+.aurora::before {
+  background: radial-gradient(circle, var(--au1), transparent 62%);
+}
+.aurora::after {
+  background: radial-gradient(circle, var(--au2), transparent 62%);
+}
+.app[data-theme='rose'] {
+  --bg: #1a0c14; --accent: #ff5c8a; --accent2: #ff9a6b;
+  --grad: linear-gradient(135deg, #ff5c8a 0%, #ff7a8a 50%, #ff9a6b 100%);
+  --au1: rgba(255, 92, 138, 0.5); --au2: rgba(255, 154, 107, 0.38);
+}
+.app[data-theme='ocean'] {
+  --bg: #08121f; --accent: #2dd4ff; --accent2: #3b6dff;
+  --grad: linear-gradient(135deg, #1fb6ff 0%, #3b8bff 50%, #4a5cff 100%);
+  --au1: rgba(45, 140, 255, 0.5); --au2: rgba(45, 212, 255, 0.35);
+}
+.app[data-theme='forest'] {
+  --bg: #08150f; --accent: #3ddc97; --accent2: #1aa6a0;
+  --grad: linear-gradient(135deg, #2fc98a 0%, #1fb59a 55%, #1a9aa8 100%);
+  --au1: rgba(26, 166, 160, 0.5); --au2: rgba(61, 220, 151, 0.33);
+}
+.app[data-theme='sunset'] {
+  --bg: #1a0e0a; --accent: #ff8a3d; --accent2: #e5426b;
+  --grad: linear-gradient(135deg, #ff9a3d 0%, #f2605a 55%, #e5426b 100%);
+  --au1: rgba(229, 66, 107, 0.5); --au2: rgba(255, 138, 61, 0.38);
+}
+.app[data-theme='mono'] {
+  --bg: #0d0f14; --accent: #9aa4b8; --accent2: #5b6478;
+  --grad: linear-gradient(135deg, #7d889e 0%, #5f6a82 100%);
+  --au1: rgba(110, 120, 145, 0.35); --au2: rgba(150, 160, 185, 0.22);
+}
+.app[data-theme='gold'] {
+  --bg: #15110a; --accent: #f5c451; --accent2: #d9822b;
+  --grad: linear-gradient(135deg, #e9a93a 0%, #d9822b 100%);
+  --au1: rgba(217, 130, 43, 0.45); --au2: rgba(245, 196, 81, 0.3);
+}
+.wall {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+.app[data-wall='dots'] .wall {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.09) 1.5px, transparent 1.6px);
+  background-size: 22px 22px;
+}
+.app[data-wall='lines'] .wall {
+  background-image: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.045) 0 2px, transparent 2px 15px);
+}
+.app[data-wall='hearts'] .wall {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='72' height='72'%3E%3Ctext x='8' y='30' font-size='18' fill='white' fill-opacity='.08'%3E%E2%99%A5%3C/text%3E%3Ctext x='42' y='62' font-size='13' fill='white' fill-opacity='.06'%3E%E2%99%A5%3C/text%3E%3C/svg%3E");
+}
+.ping.quick {
+  max-width: 92%;
+  text-align: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.07);
+  border-color: var(--line);
+  color: var(--txt);
+}
+.quick-btn {
+  font-size: 20px;
+}
+.promise {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-width: 190px;
+}
+.promise-icon {
+  font-size: 24px;
+}
+.promise-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.promise-text {
+  font-weight: 600;
+}
+.promise-state {
+  font-size: 12px;
+  opacity: 0.75;
+}
+.promise.done .promise-state {
+  color: var(--ok);
+  opacity: 1;
+}
+.promise.late .promise-state {
+  color: #ffd27a;
+  opacity: 1;
+}
+.capsule {
+  min-width: 210px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.capsule.locked {
+  align-items: center;
+  text-align: center;
+  padding: 6px 4px;
+}
+.capsule-icon {
+  font-size: 38px;
+  animation: beat 2.4s ease-in-out infinite;
+}
+.capsule-title {
+  font-weight: 700;
+}
+.capsule-sub {
+  font-size: 13px;
+  opacity: 0.8;
+}
+.capsule-count {
+  font-variant-numeric: tabular-nums;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+.capsule-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.capsule-text {
+  width: 100%;
+  resize: none;
+  padding: 12px;
+  margin-bottom: 10px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--txt);
+  font: inherit;
+}
+.capsule-prev img {
+  width: 100%;
+  max-height: 260px;
+  object-fit: cover;
+  border-radius: 14px;
+  margin-bottom: 8px;
+}
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.theme-dot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.theme-dot span {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  box-shadow: 0 0 0 1px var(--line);
+}
+.theme-dot.on span {
+  border-color: #fff;
+}
+.theme-dot small {
+  font-size: 12px;
+  color: var(--mut);
+}

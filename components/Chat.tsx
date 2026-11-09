@@ -3,11 +3,14 @@
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
+import QuickSheet, { type QuickPick } from './QuickSheet';
+import CapsuleSheet, { type CapsuleDraft } from './CapsuleSheet';
+import ThemeSheet from './ThemeSheet';
 import ActionSheet from './ActionSheet';
 import Bubble, { type Msg } from './Bubble';
 import Composer from './Composer';
 import StatusSheet from './StatusSheet';
-import TimeSheet from './TimeSheet';
+import TimeSheet, { formatWhen } from './TimeSheet';
 import PendingSheet from './PendingSheet';
 import Avatar from './Avatar';
 import ProfileSheet from './ProfileSheet';
@@ -33,6 +36,7 @@ import {
   activeStatus,
   supabaseBrowser,
   type Kind,
+  type MsgMeta,
   type Member,
   type Message,
   type Reminder,
@@ -116,6 +120,11 @@ export default function Chat({
   const [editMsg, setEditMsg] = useState<{ id: string; text: string } | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
+  const [quickOpen, setQuickOpen] = useState(false);
+  const [capsuleOpen, setCapsuleOpen] = useState(false);
+  const [promiseFor, setPromiseFor] = useState<Msg | null>(null);
+  const [themeOpen, setThemeOpen] = useState(false);
+  const [look, setLook] = useState<{ theme: string; wall: string }>({ theme: 'aurora', wall: 'none' });
   const [flashId, setFlashId] = useState<string | null>(null);
   const [firstUnreadId, setFirstUnreadId] = useState<string | null>(null);
   const [rain, setRain] = useState<Heart[] | null>(null);
@@ -249,6 +258,16 @@ export default function Chat({
       meRef.current = mine;
       setMe(mine);
       setPartner(other);
+
+      void client
+        .from('conversation_members')
+        .select('theme, wall')
+        .eq('conversation_id', conversationId)
+        .eq('user_id', uid)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (!cancelled && data) setLook({ theme: data.theme as string, wall: data.wall as string });
+        });
 
       const first = await loadLatest();
       if (cancelled) return;
@@ -552,6 +571,52 @@ export default function Chat({
     startRain();
   }, [base, runSend, insertRow, startRain]);
 
+  const sendQuick = useCallback(
+    (q: QuickPick) => {
+      const meta: MsgMeta = { type: q.type, emoji: q.emoji };
+      const m = base('quick', { body: q.body, meta });
+      runSend(m, () => insertRow({ id: m.id, kind: 'quick', body: q.body, meta }));
+    },
+    [base, runSend, insertRow],
+  );
+
+  const createCapsule = useCallback(
+    async (d: CapsuleDraft, at: Date) => {
+      if (!meId) return;
+      showToast('🎁 Guardando cápsula…');
+      try {
+        let path: string | null = null;
+        if (d.kind === 'image') path = await uploadMedia(meId, await resizeImage(d.file), 'image/jpeg', 'jpg');
+        const { data, error } = await sb().rpc('create_capsule', {
+          p_conv: conversationId,
+          p_open_at: at.toISOString(),
+          p_kind: d.kind,
+          p_body: d.kind === 'text' ? d.body : null,
+          p_media_path: path,
+          p_media_mime: path ? 'image/jpeg' : null,
+        });
+        if (error || !data) throw error ?? new Error('sin id');
+        const id = data as string;
+        const { data: row } = await sb().from('messages').select('*').eq('id', id).maybeSingle();
+        if (row) setMsgs((p) => merge(p, [row as Message]));
+        stickRef.current = true;
+        showToast('🎁 Cápsula guardada');
+        void notifyPartner(id);
+      } catch {
+        showToast('No se pudo guardar la cápsula');
+      }
+    },
+    [meId, conversationId, sb, showToast],
+  );
+
+  const saveLook = useCallback(
+    (theme: string, wall: string) => {
+      setLook({ theme, wall });
+      void sb().rpc('set_conv_look', { p_conv: conversationId, p_theme: theme, p_wall: wall });
+    },
+    [sb, conversationId],
+  );
+
   const onTyping = useCallback(() => {
     const t = Date.now();
     if (t - lastTypingSent.current < 2500) return;
@@ -631,6 +696,27 @@ export default function Chat({
     if (!rem.error && rem.data) setReminders(rem.data as Reminder[]);
     if (!sch.error && sch.data) setScheduled(sch.data as Scheduled[]);
   }, [sb]);
+
+  const sendPromise = useCallback(
+    (target: Msg, at: Date) => {
+      if (!meId) return;
+      const body = `Te contesto ${formatWhen(at)}`;
+      const meta: MsgMeta = { at: at.toISOString() };
+      const m = base('promise', { body, meta, reply_to: target.id });
+      runSend(m, async () => {
+        await insertRow({ id: m.id, kind: 'promise', body, meta, reply_to: target.id });
+        // Para que yo también reciba el recordatorio de cumplirla
+        await sb()
+          .from('reminders')
+          .upsert(
+            { user_id: meId, message_id: m.id, remind_at: at.toISOString(), done: false, fired: 0, last_fired_at: null },
+            { onConflict: 'user_id,message_id' },
+          );
+        void loadPending();
+      });
+    },
+    [base, meId, runSend, insertRow, sb, loadPending],
+  );
 
   useEffect(() => {
     if (!meId) return;
@@ -948,6 +1034,20 @@ export default function Chat({
     return map;
   }, [reactions]);
 
+  const promiseStates = useMemo(() => {
+    const map = new Map<string, 'pending' | 'done' | 'late'>();
+    const t = now;
+    msgs.forEach((m, i) => {
+      if (m.kind !== 'promise') return;
+      const kept = msgs
+        .slice(i + 1)
+        .some((x) => x.sender_id === m.sender_id && (x.kind === 'text' || x.kind === 'image' || x.kind === 'audio'));
+      const at = m.meta?.at ? new Date(m.meta.at).getTime() : 0;
+      map.set(m.id, kept ? 'done' : at && t > at ? 'late' : 'pending');
+    });
+    return map;
+  }, [msgs, now]);
+
   const rows = useMemo(
     () =>
       msgs.map((m, i) => {
@@ -958,6 +1058,8 @@ export default function Chat({
           !newDay &&
           m.kind !== 'ping' &&
           prev.kind !== 'ping' &&
+          m.kind !== 'quick' &&
+          prev.kind !== 'quick' &&
           prev.sender_id === m.sender_id &&
           new Date(m.created_at).getTime() - new Date(prev.created_at).getTime() < GROUP_MS;
         return { m, newDay, grouped };
@@ -992,8 +1094,9 @@ export default function Chat({
   const showBanner = !bannerOff && (push === 'default' || push === 'needs-install');
 
   return (
-    <div className="app">
+    <div className="app" data-theme={look.theme} data-wall={look.wall}>
       <div className="aurora" />
+      <div className="wall" />
 
       <header className="top">
         {onBack && (
@@ -1047,6 +1150,9 @@ export default function Chat({
             </button>
             <button className="plain" onClick={() => setProfileOpen(true)}>
               Mi foto de perfil
+            </button>
+            <button className="plain" onClick={() => setThemeOpen(true)}>
+              Tema del chat 🎨
             </button>
             <button className="plain" onClick={() => setSearchOpen(true)}>
               Buscar en el chat 🔍
@@ -1169,6 +1275,7 @@ export default function Chat({
               reactions={reactionsByMsg.get(m.id) ?? []}
               flash={flashId === m.id}
               reminded={remindedIds.has(m.id)}
+              promiseState={promiseStates.get(m.id)}
               onRetry={(id) => void retryRef.current.get(id)?.()}
               onReply={setReplyTo}
               onActions={setActionMsg}
@@ -1200,6 +1307,7 @@ export default function Chat({
         onSendImage={sendImage}
         onSendAudio={sendAudio}
         onTyping={onTyping}
+        onQuick={() => setQuickOpen(true)}
       />
 
       {actionMsg && (
@@ -1216,6 +1324,12 @@ export default function Chat({
             !actionMsg.local &&
             Date.now() - new Date(actionMsg.created_at).getTime() < 24 * 60 * 60_000
           }
+          canPromise={
+            actionMsg.sender_id !== meId &&
+            !actionMsg.local &&
+            (actionMsg.kind === 'text' || actionMsg.kind === 'image' || actionMsg.kind === 'audio')
+          }
+          onPromise={() => setPromiseFor(actionMsg)}
           onEdit={() => setEditMsg({ id: actionMsg.id, text: actionMsg.body ?? '' })}
           onRemind={() => setRemindMsg(actionMsg)}
           onUnremind={() => {
@@ -1228,6 +1342,36 @@ export default function Chat({
           }}
           onDelete={() => void deleteMsg(actionMsg)}
         />
+      )}
+
+      {quickOpen && (
+        <QuickSheet
+          onSend={sendQuick}
+          onCapsule={() => setCapsuleOpen(true)}
+          onClose={() => setQuickOpen(false)}
+        />
+      )}
+
+      {capsuleOpen && (
+        <CapsuleSheet
+          partnerName={partnerName}
+          onCreate={(d, at) => void createCapsule(d, at)}
+          onClose={() => setCapsuleOpen(false)}
+        />
+      )}
+
+      {promiseFor && (
+        <TimeSheet
+          title="Prometer contestar ⏳"
+          sub={`"${snippet(promiseFor)}" — ${partnerName} verá cuándo le vas a contestar y yo te lo recuerdo.`}
+          confirmLabel="Prometer"
+          onClose={() => setPromiseFor(null)}
+          onPick={(at) => sendPromise(promiseFor, at)}
+        />
+      )}
+
+      {themeOpen && (
+        <ThemeSheet theme={look.theme} wall={look.wall} onChange={saveLook} onClose={() => setThemeOpen(false)} />
       )}
 
       {searchOpen && meId && (

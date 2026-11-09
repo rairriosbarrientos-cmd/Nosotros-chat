@@ -21,6 +21,7 @@ type Props = {
   onSendImage: (file: File) => void;
   onSendAudio: (blob: Blob, mime: string, ext: string, durationMs: number, waveform: number[]) => void;
   onTyping: () => void;
+  onQuick: () => void;
 };
 
 /** Reduce las muestras de volumen a WAVE_BARS barras (0–100) para guardarlas con la nota. */
@@ -38,7 +39,7 @@ function toWaveform(samples: number[]): number[] {
   return out.map((v) => Math.round(Math.max(10, (v / max) * 100)));
 }
 
-export default function Composer({ reply, onCancelReply, onSendText, editing, onCancelEdit, onSaveEdit, onSchedule, onSendImage, onSendAudio, onTyping }: Props) {
+export default function Composer({ reply, onCancelReply, onSendText, editing, onCancelEdit, onSaveEdit, onSchedule, onSendImage, onSendAudio, onTyping, onQuick }: Props) {
   const [text, setText] = useState('');
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -265,6 +266,11 @@ export default function Composer({ reply, onCancelReply, onSendText, editing, on
             <path d="M21 16l-5-5-8 8" />
           </svg>
         </button>
+        {!editing && (
+          <button className="icon-btn quick-btn" onClick={onQuick} aria-label="Avisos rápidos y cápsula">
+            ⚡
+          </button>
+        )}
         <input
           ref={fileRef}
           type="file"

@@ -1,0 +1,7 @@
+-- v7 (aplicado en vivo como migración "nosotros_v7_promesas_capsulas_temas")
+-- * messages.meta jsonb + nuevos kinds: promise | quick | capsule
+-- * capsule_contents (RLS: solo el autor o después de open_at) + create_capsule() + process_capsules() (cron cada minuto)
+-- * media_select incluye fotos de cápsulas
+-- * conversation_members.theme / wall + set_conv_look()
+-- * _snip() con los nuevos tipos; process_due() no empuja insistente por ping/quick/capsule/promise
+-- Ver la migración en Supabase para el SQL completo.

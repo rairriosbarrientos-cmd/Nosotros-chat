@@ -12,6 +12,8 @@ export default function ActionSheet({
   myReaction,
   reminded,
   canEdit,
+  canPromise,
+  onPromise,
   onEdit,
   onClose,
   onReact,
@@ -26,6 +28,8 @@ export default function ActionSheet({
   myReaction: string | null;
   reminded: boolean;
   canEdit: boolean;
+  canPromise: boolean;
+  onPromise: () => void;
   onEdit: () => void;
   onClose: () => void;
   onReact: (emoji: string) => void;
@@ -65,7 +69,17 @@ export default function ActionSheet({
           >
             <span>↩️</span> Responder
           </button>
-          {msg.kind !== 'ping' &&
+          {canPromise && (
+            <button
+              onClick={() => {
+                onPromise();
+                onClose();
+              }}
+            >
+              <span>⏳</span> Prometer contestar
+            </button>
+          )}
+          {(msg.kind === 'text' || msg.kind === 'image' || msg.kind === 'audio' || msg.kind === 'promise') &&
             (reminded ? (
               <button
                 onClick={() => {

@@ -22,6 +22,8 @@ export function snippet(m: Pick<Message, 'kind' | 'body'>): string {
   if (m.kind === 'image') return '📷 Foto';
   if (m.kind === 'audio') return '🎤 Nota de voz';
   if (m.kind === 'ping') return '💜 Toque';
+  if (m.kind === 'capsule') return '🎁 Cápsula del tiempo';
+  if (m.kind === 'promise') return `⏳ ${(m.body ?? '').slice(0, 80)}`;
   const t = (m.body ?? '').replace(/\s+/g, ' ').trim();
   return t.length > 90 ? `${t.slice(0, 87)}…` : t;
 }

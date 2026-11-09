@@ -17,7 +17,9 @@ export function supabaseBrowser(): SupabaseClient {
   return client;
 }
 
-export type Kind = 'text' | 'image' | 'audio' | 'ping';
+export type Kind = 'text' | 'image' | 'audio' | 'ping' | 'promise' | 'quick' | 'capsule';
+
+export type MsgMeta = { at?: string; type?: string; emoji?: string; open_at?: string; ctype?: 'text' | 'image' };
 
 export type Message = {
   id: string;
@@ -33,6 +35,7 @@ export type Message = {
   read_at: string | null;
   conversation_id?: string;
   edited_at?: string | null;
+  meta?: MsgMeta | null;
 };
 
 export type Member = {
@@ -44,6 +47,22 @@ export type Member = {
   nudges_on?: boolean;
   avatar_path?: string | null;
 };
+
+export const THEMES = [
+  { id: 'aurora', name: 'Aurora', a: '#ff6b8b', b: '#7c5cff' },
+  { id: 'rose', name: 'Rosa', a: '#ff5c8a', b: '#ff9a6b' },
+  { id: 'ocean', name: 'Océano', a: '#2dd4ff', b: '#3b6dff' },
+  { id: 'forest', name: 'Bosque', a: '#3ddc97', b: '#1aa6a0' },
+  { id: 'sunset', name: 'Atardecer', a: '#ff8a3d', b: '#e5426b' },
+  { id: 'mono', name: 'Noche', a: '#9aa4b8', b: '#5b6478' },
+  { id: 'gold', name: 'Dorado', a: '#f5c451', b: '#d9822b' },
+] as const;
+export const WALLS = [
+  { id: 'none', name: 'Liso' },
+  { id: 'dots', name: 'Puntos' },
+  { id: 'hearts', name: 'Corazones' },
+  { id: 'lines', name: 'Líneas' },
+] as const;
 
 export type Story = {
   id: string;
