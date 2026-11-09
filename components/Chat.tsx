@@ -9,8 +9,12 @@ import Composer from './Composer';
 import StatusSheet from './StatusSheet';
 import TimeSheet from './TimeSheet';
 import PendingSheet from './PendingSheet';
+import Avatar from './Avatar';
+import ProfileSheet from './ProfileSheet';
+import StoryComposer, { type StoryDraft } from './StoryComposer';
+import StoryViewer from './StoryViewer';
 import { formatUntil, snippet } from '@/lib/emoji';
-import { resizeImage, uploadMedia } from '@/lib/media';
+import { getSignedUrl, resizeImage, squareImage, uploadMedia } from '@/lib/media';
 import {
   disablePush,
   enablePush,
@@ -30,6 +34,8 @@ import {
   type Message,
   type Reminder,
   type Scheduled,
+  type Story,
+  type StoryView,
   type Reaction,
 } from '@/lib/supabase';
 
@@ -86,6 +92,12 @@ export default function Chat() {
   const [scheduled, setScheduled] = useState<Scheduled[]>([]);
   const [remindMsg, setRemindMsg] = useState<Msg | null>(null);
   const [pendingOpen, setPendingOpen] = useState(false);
+  const [stories, setStories] = useState<Story[]>([]);
+  const [storyViews, setStoryViews] = useState<StoryView[]>([]);
+  const [viewer, setViewer] = useState<{ who: 'me' | 'partner'; index: number } | null>(null);
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [avatarBusy, setAvatarBusy] = useState(false);
   const [flashId, setFlashId] = useState<string | null>(null);
   const [firstUnreadId, setFirstUnreadId] = useState<string | null>(null);
   const [rain, setRain] = useState<Heart[] | null>(null);
@@ -106,6 +118,7 @@ export default function Chat() {
   const lastTypingSent = useRef(0);
   const lastPing = useRef(0);
   const replyRef = useRef<Msg | null>(null);
+  const loadStoriesRef = useRef<() => void>(() => {});
 
   const sb = supabaseBrowser;
   const meId = me?.user_id;
@@ -192,7 +205,7 @@ export default function Chat() {
 
       const { data: members, error } = await client
         .from('members')
-        .select('user_id, display_name, status_emoji, status_text, status_until, nudges_on');
+        .select('user_id, display_name, status_emoji, status_text, status_until, nudges_on, avatar_path');
       if (cancelled) return;
       const mine = (members as Member[] | null)?.find((m) => m.user_id === uid);
       if (error || !mine) {
@@ -258,6 +271,8 @@ export default function Chat() {
             setPartner(m);
           }
         })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'stories' }, () => loadStoriesRef.current())
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'story_views' }, () => loadStoriesRef.current())
         .on('broadcast', { event: 'typing' }, () => {
           setTyping(true);
           if (typingTimer.current) clearTimeout(typingTimer.current);
@@ -667,6 +682,161 @@ export default function Chat() {
     showToast(next ? '🔔 Te insistiré si no contestas' : '🔕 Sin insistencia');
   }, [sb, showToast]);
 
+  const loadStories = useCallback(async () => {
+    const client = sb();
+    const { data, error } = await client
+      .from('stories')
+      .select('id, user_id, kind, media_path, caption, bg, created_at, expires_at')
+      .order('created_at');
+    if (error || !data) return;
+    const t = Date.now();
+    const all = data as Story[];
+    const live = all.filter((x) => new Date(x.expires_at).getTime() > t);
+    setStories(live);
+    if (live.length) {
+      const v = await client
+        .from('story_views')
+        .select('story_id, viewer_id, seen_at')
+        .in(
+          'story_id',
+          live.map((x) => x.id),
+        );
+      if (!v.error && v.data) setStoryViews(v.data as StoryView[]);
+    } else {
+      setStoryViews([]);
+    }
+    // Limpieza: tus estados vencidos se borran (fila y foto)
+    const mineId = meRef.current?.user_id;
+    const expired = all.filter((x) => x.user_id === mineId && new Date(x.expires_at).getTime() <= t);
+    if (expired.length) {
+      const paths = expired.map((x) => x.media_path).filter((x): x is string => !!x);
+      if (paths.length) await client.storage.from('media').remove(paths);
+      await client.from('stories').delete().in(
+        'id',
+        expired.map((x) => x.id),
+      );
+    }
+  }, [sb]);
+
+  useEffect(() => {
+    loadStoriesRef.current = () => void loadStories();
+  }, [loadStories]);
+
+  useEffect(() => {
+    if (!meId) return;
+    void loadStories();
+    const t = setInterval(() => void loadStories(), 60_000);
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void loadStories();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [meId, loadStories]);
+
+  const publishStory = useCallback(
+    async (d: StoryDraft) => {
+      if (!meId) return;
+      showToast('Subiendo estado…');
+      try {
+        const media_path =
+          d.kind === 'image' ? await uploadMedia(meId, await resizeImage(d.file, 1440, 0.82), 'image/jpeg', 'jpg') : null;
+        const { error } = await sb()
+          .from('stories')
+          .insert({
+            user_id: meId,
+            kind: d.kind,
+            media_path,
+            caption: d.caption || null,
+            bg: d.kind === 'text' ? d.bg : null,
+          });
+        if (error) throw error;
+        showToast('✨ Estado publicado (dura 24 h)');
+        void loadStories();
+      } catch {
+        showToast('No se pudo publicar el estado');
+      }
+    },
+    [meId, sb, showToast, loadStories],
+  );
+
+  const deleteStory = useCallback(
+    async (id: string) => {
+      const st = stories.find((x) => x.id === id);
+      setStories((p) => p.filter((x) => x.id !== id));
+      const { error } = await sb().from('stories').delete().eq('id', id);
+      if (error) {
+        showToast('No se pudo borrar');
+        void loadStories();
+        return;
+      }
+      if (st?.media_path) void sb().storage.from('media').remove([st.media_path]);
+    },
+    [stories, sb, showToast, loadStories],
+  );
+
+  const markStorySeen = useCallback(
+    (id: string) => {
+      if (!meId) return;
+      setStoryViews((p) =>
+        p.some((v) => v.story_id === id && v.viewer_id === meId)
+          ? p
+          : [...p, { story_id: id, viewer_id: meId, seen_at: new Date().toISOString() }],
+      );
+      void sb()
+        .from('story_views')
+        .upsert({ story_id: id, viewer_id: meId }, { onConflict: 'story_id,viewer_id', ignoreDuplicates: true });
+    },
+    [meId, sb],
+  );
+
+  const setAvatar = useCallback(
+    async (file: File | null) => {
+      if (!meId) return;
+      setAvatarBusy(true);
+      try {
+        const path = file ? await uploadMedia(meId, await squareImage(file), 'image/jpeg', 'jpg') : null;
+        const { error } = await sb().rpc('set_avatar', { p_path: path });
+        if (error) throw error;
+        const cur = meRef.current;
+        const old = cur?.avatar_path;
+        if (cur) {
+          const next = { ...cur, avatar_path: path };
+          meRef.current = next;
+          setMe(next);
+        }
+        if (old) void sb().storage.from('media').remove([old]);
+        showToast(file ? '📸 Foto actualizada' : 'Foto quitada');
+      } catch {
+        showToast('No se pudo cambiar la foto');
+      } finally {
+        setAvatarBusy(false);
+      }
+    },
+    [meId, sb, showToast],
+  );
+
+  const openPartnerPhoto = useCallback(async () => {
+    const path = partner?.avatar_path;
+    if (!path) return;
+    const url = await getSignedUrl(path);
+    if (url) setLightbox(url);
+  }, [partner?.avatar_path]);
+
+  const liveStories = useMemo(() => stories.filter((x) => new Date(x.expires_at).getTime() > now), [stories, now]);
+  const myStories = useMemo(() => liveStories.filter((x) => x.user_id === meId), [liveStories, meId]);
+  const partnerStories = useMemo(
+    () => liveStories.filter((x) => x.user_id !== meId),
+    [liveStories, meId],
+  );
+  const seenByMe = useMemo(
+    () => new Set(storyViews.filter((v) => v.viewer_id === meId).map((v) => v.story_id)),
+    [storyViews, meId],
+  );
+  const firstUnseenPartner = partnerStories.findIndex((x) => !seenByMe.has(x.id));
+
   const remindedIds = useMemo(() => new Set(reminders.map((r) => r.message_id)), [reminders]);
 
   const jumpTo = useCallback((id: string) => {
@@ -746,17 +916,24 @@ export default function Chat() {
   const myStatus = activeStatus(me, now);
   const theirStatus = activeStatus(partner, now);
   const showBanner = !bannerOff && (push === 'default' || push === 'needs-install');
-  const initial = partnerName.slice(0, 1).toUpperCase();
 
   return (
     <div className="app">
       <div className="aurora" />
 
       <header className="top">
-        <div className={`avatar ${online ? 'is-online' : ''}`}>
-          {initial}
-          {online && <span className="online-dot" />}
-        </div>
+        <Avatar
+          name={partnerName}
+          path={partner?.avatar_path}
+          size={46}
+          online={online}
+          ring={partnerStories.length ? (firstUnseenPartner >= 0 ? 'new' : 'seen') : null}
+          label={partnerStories.length ? `Ver estado de ${partnerName}` : `Foto de ${partnerName}`}
+          onClick={() => {
+            if (partnerStories.length) setViewer({ who: 'partner', index: Math.max(0, firstUnseenPartner) });
+            else if (partner?.avatar_path) void openPartnerPhoto();
+          }}
+        />
         <div className="who">
           <div className="who-name">{partnerName}</div>
           <div className={`who-status ${typing || online ? 'on' : ''}`}>
@@ -783,6 +960,12 @@ export default function Chat() {
               }}
             >
               Mi estado
+            </button>
+            <button className="plain" onClick={() => setComposeOpen(true)}>
+              Subir historia 📸
+            </button>
+            <button className="plain" onClick={() => setProfileOpen(true)}>
+              Mi foto de perfil
             </button>
             <button className="plain" onClick={() => setPendingOpen(true)}>
               Pendientes{reminders.length + scheduled.length > 0 ? ` (${reminders.length + scheduled.length})` : ''}
@@ -813,6 +996,16 @@ export default function Chat() {
         ) : (
           <div className="spill-spacer" />
         )}
+        <div className="mine-group">
+        <Avatar
+          name={me?.display_name ?? 'Yo'}
+          path={me?.avatar_path}
+          size={34}
+          ring={myStories.length ? 'mine' : null}
+          plus={myStories.length === 0}
+          label={myStories.length ? 'Ver mi estado' : 'Subir estado'}
+          onClick={() => (myStories.length ? setViewer({ who: 'me', index: 0 }) : setComposeOpen(true))}
+        />
         <button className={`spill mine ${myStatus ? 'set' : ''}`} onClick={() => setStatusOpen(true)}>
           {myStatus ? (
             <>
@@ -827,6 +1020,7 @@ export default function Chat() {
             </>
           )}
         </button>
+        </div>
       </div>
 
       {showBanner && (
@@ -931,6 +1125,37 @@ export default function Chat() {
             if (actionMsg.body) void navigator.clipboard?.writeText(actionMsg.body).catch(() => {});
           }}
           onDelete={() => void deleteMsg(actionMsg)}
+        />
+      )}
+
+      {composeOpen && <StoryComposer onPublish={(d) => void publishStory(d)} onClose={() => setComposeOpen(false)} />}
+
+      {profileOpen && (
+        <ProfileSheet
+          name={me?.display_name ?? 'Yo'}
+          path={me?.avatar_path ?? null}
+          busy={avatarBusy}
+          onPick={(f) => void setAvatar(f)}
+          onRemove={() => void setAvatar(null)}
+          onClose={() => setProfileOpen(false)}
+        />
+      )}
+
+      {viewer && (viewer.who === 'me' ? myStories : partnerStories).length > 0 && (
+        <StoryViewer
+          stories={viewer.who === 'me' ? myStories : partnerStories}
+          startIndex={viewer.index}
+          ownerName={viewer.who === 'me' ? (me?.display_name ?? 'Yo') : partnerName}
+          avatarPath={(viewer.who === 'me' ? me : partner)?.avatar_path ?? null}
+          mine={viewer.who === 'me'}
+          views={storyViews}
+          onSeen={markStorySeen}
+          onDelete={(id) => void deleteStory(id)}
+          onAdd={() => {
+            setViewer(null);
+            setComposeOpen(true);
+          }}
+          onClose={() => setViewer(null)}
         />
       )}
 

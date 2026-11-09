@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<defs>
+  <radialGradient id="bg1" cx="30%" cy="20%" r="95%"><stop offset="0" stop-color="#2d1650"/><stop offset="0.55" stop-color="#17102a"/><stop offset="1" stop-color="#0d0918"/></radialGradient>
+  <radialGradient id="glow" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#b05cf0" stop-opacity=".45"/><stop offset="1" stop-color="#b05cf0" stop-opacity="0"/></radialGradient>
+</defs>
+<rect width="512" height="512" rx="112" fill="url(#bg1)"/>
+<circle cx="256" cy="262" r="230" fill="url(#glow)"/>
+<g transform="translate(256 256) scale(1.0) translate(-256 -258)">
+<defs>
+  <linearGradient id="gA" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff7a9c"/><stop offset="1" stop-color="#ff9a5c"/></linearGradient>
+  <linearGradient id="gB" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#c06bff"/><stop offset="1" stop-color="#6a5cf5"/></linearGradient>
+  <linearGradient id="gH" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff6b8b"/><stop offset="1" stop-color="#b05cf0"/></linearGradient>
+  <clipPath id="clipA"><rect x="70" y="110" width="250" height="210" rx="105"/></clipPath>
+</defs>
+<g>
+  <path d="M112 300 L84 392 L186 330 Z" fill="url(#gA)"/>
+  <rect x="70" y="110" width="250" height="210" rx="105" fill="url(#gA)"/>
+  <path d="M400 350 L430 440 L326 372 Z" fill="url(#gB)"/>
+  <rect x="192" y="160" width="250" height="210" rx="105" fill="url(#gB)"/>
+  <g clip-path="url(#clipA)"><rect x="192" y="160" width="250" height="210" rx="105" fill="#fff6fb"/></g>
+  <path d="M256 305 C214 272 204 246 204 228 C204 208 219 196 235 196 C245 196 252 201 256 208 C260 201 267 196 277 196 C293 196 308 208 308 228 C308 246 298 272 256 305 Z" fill="url(#gH)" transform="translate(0,-4)"/>
+</g>
+</g>
+</svg>

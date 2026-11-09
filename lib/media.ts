@@ -58,6 +58,22 @@ export async function resizeImage(file: File, max = 1600, quality = 0.82): Promi
   );
 }
 
+/** Recorta al centro en cuadrado (foto de perfil). */
+export async function squareImage(file: File, size = 512, quality = 0.86): Promise<Blob> {
+  const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  const side = Math.min(bitmap.width, bitmap.height);
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('No pude procesar la imagen');
+  ctx.drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, size, size);
+  bitmap.close();
+  return new Promise((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('No pude procesar la imagen'))), 'image/jpeg', quality),
+  );
+}
+
 /** Formato de audio que sí soporta este dispositivo (iPhone: mp4/aac, Android: webm/opus o mp4). */
 export function pickAudioMime(): { mime: string; ext: string } | null {
   if (typeof MediaRecorder === 'undefined') return null;

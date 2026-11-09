@@ -173,3 +173,5 @@ revoke all on function public.set_prefs(boolean) from public, anon;
 grant execute on function public.set_prefs(boolean) to authenticated;
 
 select cron.schedule('nosotros-due', '* * * * *', $$select public.process_due()$$);
+
+-- v4 (aplicado): fotos de perfil e historias. Ver también supabase/v4_perfil_historias.sql

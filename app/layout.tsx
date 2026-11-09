@@ -9,7 +9,10 @@ export const metadata: Metadata = {
   applicationName: name,
   robots: { index: false, follow: false },
   icons: {
-    icon: [{ url: '/icon-192.png', sizes: '192x192', type: 'image/png' }],
+    icon: [
+      { url: '/logo.svg', type: 'image/svg+xml' },
+      { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+    ],
     apple: [{ url: '/apple-touch-icon.png', sizes: '180x180' }],
   },
   appleWebApp: { capable: true, title: name, statusBarStyle: 'black-translucent' },

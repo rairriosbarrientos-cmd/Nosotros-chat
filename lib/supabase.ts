@@ -40,7 +40,20 @@ export type Member = {
   status_text: string | null;
   status_until: string | null;
   nudges_on?: boolean;
+  avatar_path?: string | null;
 };
+
+export type Story = {
+  id: string;
+  user_id: string;
+  kind: 'image' | 'text';
+  media_path: string | null;
+  caption: string | null;
+  bg: string | null;
+  created_at: string;
+  expires_at: string;
+};
+export type StoryView = { story_id: string; viewer_id: string; seen_at: string };
 
 export type Reminder = { id: string; message_id: string; remind_at: string };
 export type Scheduled = { id: string; body: string; send_at: string };
