@@ -1,0 +1,7 @@
+# Netlify detecta Next.js solo (adaptador OpenNext, sin configuración extra).
+# Solo fijamos Node: Next 16 necesita Node 20.9 o más.
+[build]
+  command = "npm run build"
+
+[build.environment]
+  NODE_VERSION = "22"
