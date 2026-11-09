@@ -42,7 +42,7 @@ button {
 
 .app {
   position: fixed;
-  top: 0;
+  top: var(--app-top, 0px);
   left: 0;
   right: 0;
   height: var(--app-h, 100dvh);

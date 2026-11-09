@@ -392,6 +392,7 @@ export default function Chat({
     if (!vv) return;
     const set = () => {
       document.documentElement.style.setProperty('--app-h', `${vv.height}px`);
+      document.documentElement.style.setProperty('--app-top', `${vv.offsetTop}px`);
       if (stickRef.current) requestAnimationFrame(() => scrollBottom());
     };
     set();
@@ -401,6 +402,7 @@ export default function Chat({
       vv.removeEventListener('resize', set);
       vv.removeEventListener('scroll', set);
       document.documentElement.style.removeProperty('--app-h');
+      document.documentElement.style.removeProperty('--app-top');
     };
   }, [scrollBottom]);
 
