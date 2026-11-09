@@ -11,6 +11,8 @@ export default function ActionSheet({
   mine,
   myReaction,
   reminded,
+  canEdit,
+  onEdit,
   onClose,
   onReact,
   onReply,
@@ -23,6 +25,8 @@ export default function ActionSheet({
   mine: boolean;
   myReaction: string | null;
   reminded: boolean;
+  canEdit: boolean;
+  onEdit: () => void;
   onClose: () => void;
   onReact: (emoji: string) => void;
   onReply: () => void;
@@ -81,6 +85,16 @@ export default function ActionSheet({
                 <span>⏰</span> Recordármelo
               </button>
             ))}
+          {canEdit && (
+            <button
+              onClick={() => {
+                onEdit();
+                onClose();
+              }}
+            >
+              <span>✏️</span> Editar
+            </button>
+          )}
           {msg.kind === 'text' && (
             <button
               onClick={() => {

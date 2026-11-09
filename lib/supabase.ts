@@ -32,6 +32,7 @@ export type Message = {
   created_at: string;
   read_at: string | null;
   conversation_id?: string;
+  edited_at?: string | null;
 };
 
 export type Member = {

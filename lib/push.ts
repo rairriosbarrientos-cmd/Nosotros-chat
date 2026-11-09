@@ -92,6 +92,23 @@ export async function notifyPartner(messageId: string) {
   }
 }
 
+/** Avisa a tus contactos que subiste un estado (best-effort). */
+export async function notifyStory(storyId: string) {
+  try {
+    const { data } = await supabaseBrowser().auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) return;
+    await fetch('/api/notify-story', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ storyId }),
+      keepalive: true,
+    });
+  } catch {
+    /* el aviso es un extra */
+  }
+}
+
 /** Al cerrar sesión: este dispositivo deja de recibir los avisos de esa cuenta. */
 export async function disablePush() {
   try {

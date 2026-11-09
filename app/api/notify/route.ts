@@ -67,10 +67,11 @@ export async function POST(req: Request) {
   // Solo las personas de ESTA conversación (el resto de los chats no se entera)
   const { data: others } = await supabase
     .from('conversation_members')
-    .select('user_id')
+    .select('user_id, muted')
     .eq('conversation_id', msg.conversation_id)
     .neq('user_id', me);
-  const otherIds = (others ?? []).map((o) => o.user_id as string);
+  // Quien silenció este chat no recibe aviso
+  const otherIds = (others ?? []).filter((o) => !o.muted).map((o) => o.user_id as string);
   if (!otherIds.length) return Response.json({ sent: 0 });
 
   const { data: subs } = await supabase

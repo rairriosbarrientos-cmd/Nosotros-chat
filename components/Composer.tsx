@@ -14,6 +14,9 @@ type Props = {
   reply: { name: string; text: string } | null;
   onCancelReply: () => void;
   onSendText: (text: string) => void;
+  editing: { id: string; text: string } | null;
+  onCancelEdit: () => void;
+  onSaveEdit: (text: string) => void;
   onSchedule: (text: string, at: Date) => void;
   onSendImage: (file: File) => void;
   onSendAudio: (blob: Blob, mime: string, ext: string, durationMs: number, waveform: number[]) => void;
@@ -35,7 +38,7 @@ function toWaveform(samples: number[]): number[] {
   return out.map((v) => Math.round(Math.max(10, (v / max) * 100)));
 }
 
-export default function Composer({ reply, onCancelReply, onSendText, onSchedule, onSendImage, onSendAudio, onTyping }: Props) {
+export default function Composer({ reply, onCancelReply, onSendText, editing, onCancelEdit, onSaveEdit, onSchedule, onSendImage, onSendAudio, onTyping }: Props) {
   const [text, setText] = useState('');
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -66,9 +69,25 @@ export default function Composer({ reply, onCancelReply, onSendText, onSchedule,
     if (reply) taRef.current?.focus();
   }, [reply]);
 
+  // Al elegir "Editar", carga el texto y enfoca
+  useEffect(() => {
+    if (!editing) return;
+    setText(editing.text);
+    requestAnimationFrame(() => {
+      resize();
+      taRef.current?.focus();
+    });
+  }, [editing, resize]);
+
   const submit = () => {
     const value = text.trim();
     if (!value) return;
+    if (editing) {
+      onSaveEdit(value);
+      setText('');
+      requestAnimationFrame(resize);
+      return;
+    }
     onSendText(value);
     setText('');
     requestAnimationFrame(() => {
@@ -206,7 +225,27 @@ export default function Composer({ reply, onCancelReply, onSendText, onSchedule,
           {error}
         </div>
       )}
-      {reply && (
+      {editing && (
+        <div className="reply-bar">
+          <div className="reply-accent" />
+          <div className="reply-body">
+            <div className="reply-name">Editando mensaje</div>
+            <div className="reply-text">{editing.text}</div>
+          </div>
+          <button
+            className="icon-btn"
+            onClick={() => {
+              onCancelEdit();
+              setText('');
+              requestAnimationFrame(resize);
+            }}
+            aria-label="Cancelar edición"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+      {reply && !editing && (
         <div className="reply-bar">
           <div className="reply-accent" />
           <div className="reply-body">
@@ -258,13 +297,13 @@ export default function Composer({ reply, onCancelReply, onSendText, onSchedule,
         />
         {text.trim() ? (
           <>
-            <button className="icon-btn sched-btn" onClick={() => setTimeOpen(true)} aria-label="Programar mensaje">
+            {!editing && <button className="icon-btn sched-btn" onClick={() => setTimeOpen(true)} aria-label="Programar mensaje">
               <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="8.5" />
                 <path d="M12 7.5V12l3 2" />
               </svg>
-            </button>
-            <button className="send-btn" onClick={submit} aria-label="Enviar">
+            </button>}
+            <button className="send-btn" onClick={submit} aria-label={editing ? 'Guardar cambios' : 'Enviar'}>
               <SendIcon />
             </button>
           </>

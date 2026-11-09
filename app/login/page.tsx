@@ -10,6 +10,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
 
   // Si ya hay sesión, directo al chat
   useEffect(() => {
@@ -23,6 +24,21 @@ export default function LoginPage() {
       setError('Faltan las variables de Supabase en Netlify. Agrégalas y vuelve a desplegar.');
     }
   }, [router]);
+
+  const forgot = async () => {
+    setError(null);
+    setInfo(null);
+    if (!email.trim()) {
+      setError('Escribe tu correo arriba y vuelve a tocar');
+      return;
+    }
+    try {
+      await supabaseBrowser().auth.resetPasswordForEmail(email.trim(), { redirectTo: `${window.location.origin}/reset` });
+    } catch {
+      /* mismo mensaje siempre: no revela qué correos existen */
+    }
+    setInfo('Si ese correo está registrado, te mandamos un enlace para cambiar tu contraseña.');
+  };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -51,7 +67,7 @@ export default function LoginPage() {
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src="/icon-192.png" alt="" className="login-logo" width={96} height={96} />
       <h1>{APP_NAME}</h1>
-      <p className="login-sub">Tus chats privados 💜</p>
+      <p className="login-sub">Solo para nosotros dos</p>
       <form onSubmit={submit} className="login-form">
         <input
           type="email"
@@ -71,8 +87,12 @@ export default function LoginPage() {
           onChange={(e) => setPassword(e.target.value)}
         />
         {error && <div className="login-error">{error}</div>}
+        {info && <div className="login-info">{info}</div>}
         <button className="btn" disabled={busy}>
           {busy ? 'Entrando…' : 'Entrar'}
+        </button>
+        <button type="button" className="login-forgot" onClick={forgot}>
+          ¿Olvidaste tu contraseña?
         </button>
       </form>
     </main>

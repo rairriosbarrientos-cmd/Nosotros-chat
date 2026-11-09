@@ -13,6 +13,8 @@ import Avatar from './Avatar';
 import ProfileSheet from './ProfileSheet';
 import StoryComposer, { type StoryDraft } from './StoryComposer';
 import StoryViewer from './StoryViewer';
+import SearchSheet from './SearchSheet';
+import GallerySheet from './GallerySheet';
 import { formatUntil, snippet } from '@/lib/emoji';
 import { getSignedUrl, resizeImage, squareImage, uploadMedia } from '@/lib/media';
 import {
@@ -20,6 +22,7 @@ import {
   enablePush,
   isIOS,
   notifyPartner,
+  notifyStory,
   pushState,
   registerServiceWorker,
   syncPush,
@@ -72,10 +75,14 @@ export default function Chat({
   conversationId,
   partnerId,
   onBack,
+  muted = false,
+  onToggleMute,
 }: {
   conversationId: string;
   partnerId: string;
   onBack?: () => void;
+  muted?: boolean;
+  onToggleMute?: () => void;
 }) {
   const router = useRouter();
   const [me, setMe] = useState<Member | null>(null);
@@ -106,6 +113,9 @@ export default function Chat({
   const [composeOpen, setComposeOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [avatarBusy, setAvatarBusy] = useState(false);
+  const [editMsg, setEditMsg] = useState<{ id: string; text: string } | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [galleryOpen, setGalleryOpen] = useState(false);
   const [flashId, setFlashId] = useState<string | null>(null);
   const [firstUnreadId, setFirstUnreadId] = useState<string | null>(null);
   const [rain, setRain] = useState<Heart[] | null>(null);
@@ -769,7 +779,7 @@ export default function Chat({
       try {
         const media_path =
           d.kind === 'image' ? await uploadMedia(meId, await resizeImage(d.file, 1440, 0.82), 'image/jpeg', 'jpg') : null;
-        const { error } = await sb()
+        const { data: created, error } = await sb()
           .from('stories')
           .insert({
             user_id: meId,
@@ -777,8 +787,11 @@ export default function Chat({
             media_path,
             caption: d.caption || null,
             bg: d.kind === 'text' ? d.bg : null,
-          });
+          })
+          .select('id')
+          .single();
         if (error) throw error;
+        if (created?.id) void notifyStory(created.id as string);
         showToast('✨ Estado publicado (dura 24 h)');
         void loadStories();
       } catch {
@@ -873,6 +886,41 @@ export default function Chat({
     setFlashId(id);
     setTimeout(() => setFlashId(null), 1400);
   }, []);
+
+  const saveEdit = useCallback(
+    async (text: string) => {
+      const cur = editMsg;
+      if (!cur) return;
+      setEditMsg(null);
+      if (text === cur.text) return;
+      setMsgs((p) => p.map((m) => (m.id === cur.id ? { ...m, body: text, edited_at: new Date().toISOString() } : m)));
+      const { error } = await sb().rpc('edit_message', { p_id: cur.id, p_body: text });
+      if (error) {
+        showToast('No se pudo editar (solo dentro de 24 h)');
+        void fetchLatest();
+      }
+    },
+    [editMsg, sb, showToast, fetchLatest],
+  );
+
+  const goToMessage = useCallback(
+    async (hit: { id: string; created_at: string }) => {
+      if (!msgIdsRef.current.has(hit.id)) {
+        const oldest = msgs[0];
+        const q = sb()
+          .from('messages')
+          .select('*')
+          .eq('conversation_id', conversationId)
+          .gte('created_at', hit.created_at)
+          .order('created_at', { ascending: false })
+          .limit(500);
+        const { data } = await (oldest ? q.lt('created_at', oldest.created_at) : q);
+        if (data?.length) setMsgs((p) => merge(p, data as Message[]));
+      }
+      setTimeout(() => jumpTo(hit.id), 200);
+    },
+    [msgs, sb, conversationId, jumpTo],
+  );
 
   const signOut = async () => {
     await disablePush();
@@ -1000,6 +1048,17 @@ export default function Chat({
             <button className="plain" onClick={() => setProfileOpen(true)}>
               Mi foto de perfil
             </button>
+            <button className="plain" onClick={() => setSearchOpen(true)}>
+              Buscar en el chat 🔍
+            </button>
+            <button className="plain" onClick={() => setGalleryOpen(true)}>
+              Fotos del chat 🖼️
+            </button>
+            {onToggleMute && (
+              <button className="plain" onClick={onToggleMute}>
+                {muted ? 'Quitar silencio 🔔' : 'Silenciar chat 🔕'}
+              </button>
+            )}
             <button className="plain" onClick={() => setPendingOpen(true)}>
               Pendientes{reminders.length + scheduled.length > 0 ? ` (${reminders.length + scheduled.length})` : ''}
             </button>
@@ -1134,6 +1193,9 @@ export default function Chat({
         reply={replyTo ? { name: replyTo.sender_id === meId ? 'ti' : partnerName, text: snippet(replyTo) } : null}
         onCancelReply={() => setReplyTo(null)}
         onSendText={sendText}
+        editing={editMsg}
+        onCancelEdit={() => setEditMsg(null)}
+        onSaveEdit={(t) => void saveEdit(t)}
         onSchedule={(t, at) => void scheduleMessage(t, at)}
         onSendImage={sendImage}
         onSendAudio={sendAudio}
@@ -1148,6 +1210,13 @@ export default function Chat({
           onClose={() => setActionMsg(null)}
           onReact={(emoji) => void toggleReaction(actionMsg, emoji)}
           reminded={remindedIds.has(actionMsg.id)}
+          canEdit={
+            actionMsg.sender_id === meId &&
+            actionMsg.kind === 'text' &&
+            !actionMsg.local &&
+            Date.now() - new Date(actionMsg.created_at).getTime() < 24 * 60 * 60_000
+          }
+          onEdit={() => setEditMsg({ id: actionMsg.id, text: actionMsg.body ?? '' })}
           onRemind={() => setRemindMsg(actionMsg)}
           onUnremind={() => {
             const r = reminders.find((x) => x.message_id === actionMsg.id);
@@ -1159,6 +1228,20 @@ export default function Chat({
           }}
           onDelete={() => void deleteMsg(actionMsg)}
         />
+      )}
+
+      {searchOpen && meId && (
+        <SearchSheet
+          conversationId={conversationId}
+          meId={meId}
+          partnerName={partnerName}
+          onPick={(h) => void goToMessage(h)}
+          onClose={() => setSearchOpen(false)}
+        />
+      )}
+
+      {galleryOpen && (
+        <GallerySheet conversationId={conversationId} onOpen={(url) => setLightbox(url)} onClose={() => setGalleryOpen(false)} />
       )}
 
       {composeOpen && <StoryComposer onPublish={(d) => void publishStory(d)} onClose={() => setComposeOpen(false)} />}

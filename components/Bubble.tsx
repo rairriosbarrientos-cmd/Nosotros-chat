@@ -247,6 +247,7 @@ export default function Bubble(p: Props) {
 
         <span className={`meta ${isImage ? 'meta-over' : ''}`}>
           {p.reminded && <span className="rem-mark" aria-label="Con recordatorio">⏰ </span>}
+          {msg.edited_at && <span className="edited-mark">editado</span>}
           {time(msg.created_at)}
           {mine && <Ticks msg={msg} />}
         </span>
