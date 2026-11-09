@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 // No toca la base de datos ni usa service role: Supabase ya manda las suscripciones armadas.
 
 type Sub = { endpoint: string; p256dh: string; auth: string };
-type Item = { title: string; body: string; tag: string; subs: Sub[] };
+type Item = { title: string; body: string; tag: string; url: string; subs: Sub[] };
 
 const PUSH_HOSTS = [
   /(^|\.)googleapis\.com$/, // FCM (Android / Chrome)
@@ -44,7 +44,7 @@ function parseItems(raw: unknown): Item[] {
   const out: Item[] = [];
   for (const it of list.slice(0, 20)) {
     if (!it || typeof it !== 'object') continue;
-    const { title, body, tag, subs } = it as Record<string, unknown>;
+    const { title, body, tag, subs, url } = it as Record<string, unknown>;
     if (!isStr(title, 120) || typeof body !== 'string' || body.length > 300 || !isStr(tag, 80)) continue;
     if (!Array.isArray(subs)) continue;
     const clean: Sub[] = [];
@@ -55,7 +55,8 @@ function parseItems(raw: unknown): Item[] {
         clean.push({ endpoint, p256dh, auth });
       }
     }
-    if (clean.length) out.push({ title, body, tag, subs: clean });
+    const safeUrl = typeof url === 'string' && /^\/(\?c=[0-9a-f-]{36})?$/i.test(url) ? url : '/';
+    if (clean.length) out.push({ title, body, tag, url: safeUrl, subs: clean });
   }
   return out;
 }
@@ -86,7 +87,7 @@ export async function POST(req: Request) {
   let failed = 0;
   await Promise.all(
     items.flatMap((item) => {
-      const payload = JSON.stringify({ title: item.title, body: item.body, tag: item.tag, url: '/' });
+      const payload = JSON.stringify({ title: item.title, body: item.body, tag: item.tag, url: item.url });
       return item.subs.map(async (s) => {
         try {
           await sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload, {

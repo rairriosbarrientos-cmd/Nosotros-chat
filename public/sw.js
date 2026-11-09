@@ -32,7 +32,13 @@ self.addEventListener('notificationclick', (event) => {
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
       for (const client of list) {
-        if ('focus' in client) return client.focus();
+        if ('focus' in client) {
+          return client.focus().then((c) => {
+            // Si la notificación es de otro chat, lleva a esa conversación
+            if (c && 'navigate' in c && url !== '/') return c.navigate(url);
+            return c;
+          });
+        }
       }
       return self.clients.openWindow(url);
     }),

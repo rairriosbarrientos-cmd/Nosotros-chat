@@ -1,5 +1,5 @@
-import Chat from '@/components/Chat';
+import Home from '@/components/Home';
 
-export default function Home() {
-  return <Chat />;
+export default function Page() {
+  return <Home />;
 }

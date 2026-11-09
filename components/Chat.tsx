@@ -68,7 +68,15 @@ function dayLabel(iso: string) {
 
 type Heart = { l: number; d: number; s: number };
 
-export default function Chat() {
+export default function Chat({
+  conversationId,
+  partnerId,
+  onBack,
+}: {
+  conversationId: string;
+  partnerId: string;
+  onBack?: () => void;
+}) {
   const router = useRouter();
   const [me, setMe] = useState<Member | null>(null);
   const [partner, setPartner] = useState<Member | null>(null);
@@ -119,9 +127,14 @@ export default function Chat() {
   const lastPing = useRef(0);
   const replyRef = useRef<Msg | null>(null);
   const loadStoriesRef = useRef<() => void>(() => {});
+  const msgIdsRef = useRef<Set<string>>(new Set());
 
   const sb = supabaseBrowser;
   const meId = me?.user_id;
+
+  useEffect(() => {
+    msgIdsRef.current = new Set(msgs.map((m) => m.id));
+  }, [msgs]);
 
   useEffect(() => {
     replyRef.current = replyTo;
@@ -158,10 +171,11 @@ export default function Chat() {
     const { data, error } = await sb()
       .from('messages')
       .select('*')
+      .eq('conversation_id', conversationId)
       .order('created_at', { ascending: false })
       .limit(PAGE);
     return error ? null : ((data as Message[] | null) ?? []);
-  }, [sb]);
+  }, [sb, conversationId]);
 
   /** Mezcla lo último del servidor y quita lo que ya no existe (borrado mientras estabas fuera). */
   const applyLatest = useCallback((data: Message[]) => {
@@ -174,9 +188,17 @@ export default function Chat() {
   }, []);
 
   const loadReactions = useCallback(async () => {
-    const { data } = await sb().from('reactions').select('message_id, user_id, emoji').limit(3000);
-    if (data) setReactions(data as Reaction[]);
-  }, [sb]);
+    const { data } = await sb()
+      .from('reactions')
+      .select('message_id, user_id, emoji, messages!inner(conversation_id)')
+      .eq('messages.conversation_id', conversationId)
+      .limit(3000);
+    if (data) {
+      setReactions(
+        (data as unknown as Reaction[]).map((r) => ({ message_id: r.message_id, user_id: r.user_id, emoji: r.emoji })),
+      );
+    }
+  }, [sb, conversationId]);
 
   const fetchLatest = useCallback(async () => {
     const data = await loadLatest();
@@ -186,8 +208,8 @@ export default function Chat() {
 
   const markRead = useCallback(async () => {
     if (document.visibilityState !== 'visible') return;
-    await sb().rpc('mark_read');
-  }, [sb]);
+    await sb().rpc('mark_read', { p_conv: conversationId });
+  }, [sb, conversationId]);
 
   // Arranque: sesión, miembros, mensajes, tiempo real
   useEffect(() => {
@@ -213,7 +235,7 @@ export default function Chat() {
         setReady(true);
         return;
       }
-      const other = (members as Member[]).find((m) => m.user_id !== uid) ?? null;
+      const other = (members as Member[]).find((m) => m.user_id === partnerId) ?? null;
       meRef.current = mine;
       setMe(mine);
       setPartner(other);
@@ -234,7 +256,7 @@ export default function Chat() {
       void registerServiceWorker().then(() => syncPush().catch(() => {}));
       setPush(pushState());
 
-      channel = client.channel('nosotros', {
+      channel = client.channel(`nosotros-${conversationId}`, {
         config: { presence: { key: uid }, broadcast: { self: false } },
       });
       channel
@@ -245,6 +267,7 @@ export default function Chat() {
             return;
           }
           const m = payload.new as Message;
+          if (m.conversation_id && m.conversation_id !== conversationId) return;
           setMsgs((p) => merge(p, [m]));
           if (payload.eventType === 'INSERT' && m.sender_id !== uid) {
             if (document.visibilityState === 'visible') {
@@ -260,6 +283,7 @@ export default function Chat() {
             return;
           }
           const r = payload.new as Reaction;
+          if (!msgIdsRef.current.has(r.message_id)) return;
           setReactions((p) => [...p.filter((x) => !(x.message_id === r.message_id && x.user_id === r.user_id)), r]);
         })
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'members' }, (payload) => {
@@ -267,7 +291,7 @@ export default function Chat() {
           if (m.user_id === uid) {
             meRef.current = m;
             setMe(m);
-          } else {
+          } else if (m.user_id === partnerId) {
             setPartner(m);
           }
         })
@@ -389,6 +413,7 @@ export default function Chat() {
     const { data } = await sb()
       .from('messages')
       .select('*')
+      .eq('conversation_id', conversationId)
       .lt('created_at', oldest.created_at)
       .order('created_at', { ascending: false })
       .limit(PAGE);
@@ -398,7 +423,7 @@ export default function Chat() {
     }
     setHasMore((data?.length ?? 0) === PAGE);
     loadingOldRef.current = false;
-  }, [msgs, sb]);
+  }, [msgs, sb, conversationId]);
 
   const onScroll = () => {
     const el = listRef.current;
@@ -435,6 +460,7 @@ export default function Chat() {
       if (reply) setReplyTo(null);
       return {
         id: crypto.randomUUID(),
+        conversation_id: conversationId,
         sender_id: meId ?? '',
         kind,
         body: null,
@@ -449,15 +475,15 @@ export default function Chat() {
         ...extra,
       };
     },
-    [meId],
+    [meId, conversationId],
   );
 
   const insertRow = useCallback(
     async (row: Record<string, unknown>) => {
-      const { error } = await sb().from('messages').insert(row);
+      const { error } = await sb().from('messages').insert({ ...row, conversation_id: conversationId });
       if (error && error.code !== '23505') throw error; // 23505 = ya estaba guardado
     },
-    [sb],
+    [sb, conversationId],
   );
 
   const sendText = useCallback(
@@ -644,7 +670,7 @@ export default function Chat() {
       if (!meId) return;
       const { error } = await sb()
         .from('scheduled_messages')
-        .insert({ sender_id: meId, body: text, send_at: at.toISOString() });
+        .insert({ sender_id: meId, conversation_id: conversationId, body: text, send_at: at.toISOString() });
       if (error) {
         showToast('No se pudo programar el mensaje');
         return;
@@ -652,7 +678,7 @@ export default function Chat() {
       showToast('🕒 Mensaje programado');
       void loadPending();
     },
-    [meId, sb, showToast, loadPending],
+    [meId, conversationId, sb, showToast, loadPending],
   );
 
   const cancelScheduled = useCallback(
@@ -828,8 +854,8 @@ export default function Chat() {
   const liveStories = useMemo(() => stories.filter((x) => new Date(x.expires_at).getTime() > now), [stories, now]);
   const myStories = useMemo(() => liveStories.filter((x) => x.user_id === meId), [liveStories, meId]);
   const partnerStories = useMemo(
-    () => liveStories.filter((x) => x.user_id !== meId),
-    [liveStories, meId],
+    () => liveStories.filter((x) => x.user_id === partnerId),
+    [liveStories, partnerId],
   );
   const seenByMe = useMemo(
     () => new Set(storyViews.filter((v) => v.viewer_id === meId).map((v) => v.story_id)),
@@ -922,6 +948,13 @@ export default function Chat() {
       <div className="aurora" />
 
       <header className="top">
+        {onBack && (
+          <button className="icon-btn back-btn" onClick={onBack} aria-label="Volver a mis chats">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M15 5l-7 7 7 7" />
+            </svg>
+          </button>
+        )}
         <Avatar
           name={partnerName}
           path={partner?.avatar_path}

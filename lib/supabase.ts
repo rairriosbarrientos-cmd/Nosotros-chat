@@ -31,6 +31,7 @@ export type Message = {
   reply_to: string | null;
   created_at: string;
   read_at: string | null;
+  conversation_id?: string;
 };
 
 export type Member = {

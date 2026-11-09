@@ -49,7 +49,7 @@ export async function POST(req: Request) {
   // Solo se notifica un mensaje real, tuyo y reciente (evita usar esto para mandar textos arbitrarios)
   const { data: msg } = await supabase
     .from('messages')
-    .select('id, sender_id, kind, body, created_at')
+    .select('id, sender_id, kind, body, created_at, conversation_id')
     .eq('id', messageId)
     .eq('sender_id', me)
     .maybeSingle();
@@ -64,10 +64,19 @@ export async function POST(req: Request) {
     .eq('user_id', me)
     .maybeSingle();
 
+  // Solo las personas de ESTA conversación (el resto de los chats no se entera)
+  const { data: others } = await supabase
+    .from('conversation_members')
+    .select('user_id')
+    .eq('conversation_id', msg.conversation_id)
+    .neq('user_id', me);
+  const otherIds = (others ?? []).map((o) => o.user_id as string);
+  if (!otherIds.length) return Response.json({ sent: 0 });
+
   const { data: subs } = await supabase
     .from('push_subscriptions')
     .select('endpoint, p256dh, auth')
-    .neq('user_id', me);
+    .in('user_id', otherIds);
 
   if (!subs?.length) return Response.json({ sent: 0 });
 
@@ -75,8 +84,8 @@ export async function POST(req: Request) {
   const payload = JSON.stringify({
     title: member?.display_name ?? 'Nuevo mensaje',
     body: preview(msg.kind, msg.body),
-    tag: 'chat',
-    url: '/',
+    tag: `chat-${msg.conversation_id}`,
+    url: `/?c=${msg.conversation_id}`,
   });
 
   let sent = 0;
