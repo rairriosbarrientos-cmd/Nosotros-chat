@@ -6,7 +6,9 @@ import Avatar from './Avatar';
 import Chat from './Chat';
 import Logo from './Logo';
 import { snippet } from '@/lib/emoji';
-import { disablePush } from '@/lib/push';
+import { disablePush, registerServiceWorker } from '@/lib/push';
+import { cacheGet, cacheSet, currentUserId, isOnline, useOnline } from '@/lib/offline';
+import { flushOutbox } from '@/lib/outbox';
 import { APP_NAME, supabaseBrowser, type Member, type Message } from '@/lib/supabase';
 
 type Conv = {
@@ -41,19 +43,33 @@ export default function Home() {
 
   const load = useCallback(async () => {
     const client = sb();
-    const { data: sess } = await client.auth.getSession();
-    if (!sess.session) {
+    // Sin señal el token puede no refrescarse: usamos la última sesión guardada
+    const uid = await currentUserId(() => client.auth.getSession());
+    if (!uid) {
       router.replace('/login');
       return;
     }
-    const uid = sess.session.user.id;
     setMeId(uid);
+    if (!isOnline()) {
+      const saved = cacheGet<Conv[]>(`home:${uid}`);
+      if (!saved) throw new Error('sin conexión');
+      setConvs((p) => p ?? saved);
+      return;
+    }
 
     const [cm, mem] = await Promise.all([
       client.from('conversation_members').select('conversation_id, user_id, muted, pinned'),
       client.from('members').select('user_id, display_name, status_emoji, status_text, status_until, avatar_path'),
     ]);
-    if (cm.error || mem.error) throw new Error('sin conexión');
+    if (cm.error || mem.error) {
+      const saved = cacheGet<Conv[]>(`home:${uid}`);
+      if (saved) {
+        setConvs((p) => p ?? saved);
+        return;
+      }
+      throw new Error('sin conexión');
+    }
+    cacheSet('members', mem.data);
     const members = (mem.data ?? []) as Member[];
     const rows = (cm.data ?? []) as Array<{ conversation_id: string; user_id: string; muted: boolean; pinned: boolean }>;
     const convIds = [...new Set(rows.filter((r) => r.user_id === uid).map((r) => r.conversation_id))];
@@ -90,7 +106,36 @@ export default function Home() {
           Number(b.pinned) - Number(a.pinned) || (b.last?.created_at ?? '').localeCompare(a.last?.created_at ?? ''),
       );
     setConvs(list);
+    cacheSet(`home:${uid}`, list);
   }, [sb, router]);
+
+  const online = useOnline();
+
+  // Copia de la app para abrir sin señal + manda lo que se quedó pendiente
+  useEffect(() => {
+    void registerServiceWorker().catch(() => {});
+    const flush = () => void flushOutbox().catch(() => {});
+    flush();
+    const t = setInterval(flush, 25_000);
+    const onVis = () => document.visibilityState === 'visible' && flush();
+    window.addEventListener('online', flush);
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener('online', flush);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, []);
+
+  // Al regresar la señal, refresca la lista
+  const wasOnline = useRef(true);
+  useEffect(() => {
+    if (online && !wasOnline.current) {
+      setError(null);
+      void load().catch(() => {});
+    }
+    wasOnline.current = online;
+  }, [online, load]);
 
   useEffect(() => {
     load().catch((e: unknown) => {
@@ -98,7 +143,9 @@ export default function Home() {
       setError(
         msg.startsWith('Faltan')
           ? 'Faltan las variables de Supabase en Netlify. Agrégalas (con "Builds" marcado) y vuelve a desplegar.'
-          : 'No pude cargar el chat. Revisa tu conexión.',
+          : isOnline()
+            ? 'No pude cargar el chat. Revisa tu conexión.'
+            : 'Sin conexión. Abre la app una vez con internet para guardar tus chats en el cel.',
       );
     });
   }, [load]);
@@ -222,6 +269,7 @@ export default function Home() {
           Salir
         </button>
       </header>
+      {!online && <div className="offline-bar">Sin señal · se envía cuando regrese</div>}
       <div className="chat-list">
         {convs.map((c) => (
           <button

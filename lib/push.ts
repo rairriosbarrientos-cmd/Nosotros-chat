@@ -35,7 +35,7 @@ export function pushState(): PushState {
 
 export async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return null;
-  return navigator.serviceWorker.register('/sw.js', { scope: '/' });
+  return navigator.serviceWorker.register('/sw.js', { scope: '/', updateViaCache: 'none' });
 }
 
 async function saveSubscription(sub: PushSubscription) {

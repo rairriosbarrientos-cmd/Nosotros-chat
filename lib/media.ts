@@ -16,12 +16,65 @@ export async function getSignedUrl(path: string): Promise<string | null> {
   return data.signedUrl;
 }
 
+// ───────── Copia local de fotos/audios para verlos sin señal ─────────
+const MEDIA_CACHE = 'nosotros-media-v1';
+const MAX_MEDIA = 250;
+const offlineUrls = new Map<string, string>();
+const caching = new Set<string>();
+const mediaKey = (path: string) => `/__media/${path}`;
+
+function hasCaches(): boolean {
+  return typeof caches !== 'undefined';
+}
+
+async function fromCache(path: string): Promise<string | null> {
+  const known = offlineUrls.get(path);
+  if (known) return known;
+  if (!hasCaches()) return null;
+  try {
+    const hit = await (await caches.open(MEDIA_CACHE)).match(mediaKey(path));
+    if (!hit) return null;
+    const url = URL.createObjectURL(await hit.blob());
+    offlineUrls.set(path, url);
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+async function saveToCache(path: string, signed: string): Promise<void> {
+  if (!hasCaches() || caching.has(path)) return;
+  caching.add(path);
+  try {
+    const c = await caches.open(MEDIA_CACHE);
+    if (await c.match(mediaKey(path))) return;
+    const res = await fetch(signed);
+    if (!res.ok) return;
+    await c.put(mediaKey(path), res);
+    const keys = await c.keys();
+    if (keys.length > MAX_MEDIA) await Promise.all(keys.slice(0, keys.length - MAX_MEDIA).map((k) => c.delete(k)));
+  } catch {
+    // sin espacio o sin red: no pasa nada
+  } finally {
+    caching.delete(path);
+  }
+}
+
+/** URL para mostrar un archivo: con señal la firmada (y guarda copia), sin señal la copia local. */
+export async function getMediaUrl(path: string): Promise<string | null> {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return fromCache(path);
+  const signed = await getSignedUrl(path).catch(() => null);
+  if (!signed) return fromCache(path);
+  void saveToCache(path, signed);
+  return signed;
+}
+
 export function useSignedUrl(path: string | null, fallback?: string): string | null {
   const [url, setUrl] = useState<string | null>(fallback ?? null);
   useEffect(() => {
     if (!path) return;
     let alive = true;
-    void getSignedUrl(path).then((u) => {
+    void getMediaUrl(path).then((u) => {
       if (alive && u) setUrl(u);
     });
     return () => {

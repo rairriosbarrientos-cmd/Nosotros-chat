@@ -21,6 +21,8 @@ import SearchSheet from './SearchSheet';
 import GallerySheet from './GallerySheet';
 import { formatUntil, snippet } from '@/lib/emoji';
 import { getSignedUrl, resizeImage, squareImage, uploadMedia } from '@/lib/media';
+import { cacheGet, cacheSet, currentUserId, isOnline, useOnline } from '@/lib/offline';
+import { deliver, flushOutbox, onOutbox, outDel, outList, outPut, type OutItem } from '@/lib/outbox';
 import {
   disablePush,
   enablePush,
@@ -59,6 +61,29 @@ function merge(prev: Msg[], incoming: Msg[]): Msg[] {
   );
 }
 
+function outToMsg(it: OutItem): Msg {
+  const r = it.row as Partial<Message>;
+  return {
+    id: it.id,
+    conversation_id: it.conv,
+    sender_id: it.uid,
+    kind: (r.kind ?? 'text') as Kind,
+    body: r.body ?? null,
+    media_path: null,
+    media_mime: r.media_mime ?? it.mime ?? null,
+    duration_ms: r.duration_ms ?? null,
+    waveform: r.waveform ?? null,
+    reply_to: r.reply_to ?? null,
+    meta: r.meta ?? null,
+    created_at: it.created_at,
+    read_at: null,
+    local: 'pending',
+    localUrl: it.blob ? URL.createObjectURL(it.blob) : undefined,
+  };
+}
+
+type OutDraft = Pick<OutItem, 'row'> & Partial<Pick<OutItem, 'blob' | 'mime' | 'ext' | 'reminderAt'>>;
+
 function dayKey(iso: string) {
   const d = new Date(iso);
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
@@ -71,7 +96,11 @@ function dayLabel(iso: string) {
   yesterday.setDate(today.getDate() - 1);
   if (dayKey(iso) === dayKey(today.toISOString())) return 'Hoy';
   if (dayKey(iso) === dayKey(yesterday.toISOString())) return 'Ayer';
-  return d.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
+  return d.toLocaleDateString('es-MX', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
 }
 
 type Heart = { l: number; d: number; s: number };
@@ -114,7 +143,10 @@ export default function Chat({
   const [pendingOpen, setPendingOpen] = useState(false);
   const [stories, setStories] = useState<Story[]>([]);
   const [storyViews, setStoryViews] = useState<StoryView[]>([]);
-  const [viewer, setViewer] = useState<{ who: 'me' | 'partner'; index: number } | null>(null);
+  const [viewer, setViewer] = useState<{
+    who: 'me' | 'partner';
+    index: number;
+  } | null>(null);
   const [composeOpen, setComposeOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [avatarBusy, setAvatarBusy] = useState(false);
@@ -125,11 +157,17 @@ export default function Chat({
   const [capsuleOpen, setCapsuleOpen] = useState(false);
   const [promiseFor, setPromiseFor] = useState<Msg | null>(null);
   const [themeOpen, setThemeOpen] = useState(false);
-  const [look, setLook] = useState<{ theme: string; wall: string }>({ theme: 'aurora', wall: 'none' });
+  const [look, setLook] = useState<{ theme: string; wall: string }>({
+    theme: 'aurora',
+    wall: 'none',
+  });
   const [flashId, setFlashId] = useState<string | null>(null);
   const [firstUnreadId, setFirstUnreadId] = useState<string | null>(null);
   const [rain, setRain] = useState<Heart[] | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [boot, setBoot] = useState(0);
+  const netOn = useOnline();
+  const offlineBootRef = useRef(false);
 
   const listRef = useRef<HTMLDivElement | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -215,7 +253,11 @@ export default function Chat({
       .limit(3000);
     if (data) {
       setReactions(
-        (data as unknown as Reaction[]).map((r) => ({ message_id: r.message_id, user_id: r.user_id, emoji: r.emoji })),
+        (data as unknown as Reaction[]).map((r) => ({
+          message_id: r.message_id,
+          user_id: r.user_id,
+          emoji: r.emoji,
+        })),
       );
     }
   }, [sb, conversationId]);
@@ -238,48 +280,84 @@ export default function Chat({
 
     (async () => {
       const client = sb();
-      const { data: sess } = await client.auth.getSession();
-      if (!sess.session) {
+      const uid = await currentUserId(() => client.auth.getSession());
+      if (!uid) {
         router.replace('/login');
         return;
       }
-      const uid = sess.session.user.id;
 
-      const { data: members, error } = await client
-        .from('members')
-        .select('user_id, display_name, status_emoji, status_text, status_until, nudges_on, avatar_path');
+      const savedLook = cacheGet<{ theme: string; wall: string }>(`look:${conversationId}`);
+      if (savedLook) setLook(savedLook);
+
+      const offlineNow = !isOnline();
+      const { data: members, error } = offlineNow
+        ? { data: null, error: { message: 'offline' } }
+        : await client
+            .from('members')
+            .select('user_id, display_name, status_emoji, status_text, status_until, nudges_on, avatar_path');
       if (cancelled) return;
-      const mine = (members as Member[] | null)?.find((m) => m.user_id === uid);
-      if (error || !mine) {
-        setFatal('Esta cuenta no está autorizada en este chat.');
+      const memList = error ? cacheGet<Member[]>('members') : (members as Member[] | null);
+      if (!error && members) cacheSet('members', members);
+      const mine = memList?.find((m) => m.user_id === uid);
+      if (!mine) {
+        setFatal(
+          error ? 'No pude cargar el chat. Revisa tu conexión.' : 'Esta cuenta no está autorizada en este chat.',
+        );
         setReady(true);
         return;
       }
-      const other = (members as Member[]).find((m) => m.user_id === partnerId) ?? null;
+      const other = memList?.find((m) => m.user_id === partnerId) ?? null;
       meRef.current = mine;
       setMe(mine);
       setPartner(other);
 
-      void client
-        .from('conversation_members')
-        .select('theme, wall')
-        .eq('conversation_id', conversationId)
-        .eq('user_id', uid)
-        .maybeSingle()
-        .then(({ data }) => {
-          if (!cancelled && data) setLook({ theme: data.theme as string, wall: data.wall as string });
-        });
+      if (!offlineNow)
+        void client
+          .from('conversation_members')
+          .select('theme, wall')
+          .eq('conversation_id', conversationId)
+          .eq('user_id', uid)
+          .maybeSingle()
+          .then(({ data }) => {
+            if (!cancelled && data) {
+              const l = {
+                theme: data.theme as string,
+                wall: data.wall as string,
+              };
+              setLook(l);
+              cacheSet(`look:${conversationId}`, l);
+            }
+          });
 
-      const first = await loadLatest();
+      const first = offlineNow ? null : await loadLatest();
       if (cancelled) return;
-      if (first === null) throw new Error('sin conexión');
-      const asc = merge([], first);
+      const saved = first === null ? cacheGet<Message[]>(`msgs:${conversationId}`) : null;
+      if (first === null && !saved) throw new Error('sin conexión');
+      const asc = merge([], first ?? saved ?? []);
       const unread = asc.find((m) => m.sender_id !== uid && !m.read_at && m.kind !== 'ping');
       firstUnreadRef.current = unread?.id ?? null;
       setFirstUnreadId(unread?.id ?? null);
-      setMsgs(asc);
-      setHasMore(first.length === PAGE);
+      setMsgs((p) =>
+        merge(
+          p.filter((m) => m.local),
+          asc,
+        ),
+      );
+      setHasMore(first !== null && first.length === PAGE);
       setReady(true);
+
+      // Lo que se quedó sin mandar (aunque hayas cerrado la app)
+      const pend = await outList(conversationId);
+      if (cancelled) return;
+      if (pend.length) {
+        setMsgs((p) => merge(p, pend.filter((it) => !p.some((m) => m.id === it.id)).map(outToMsg)));
+        for (const it of pend) retryRef.current.set(it.id, () => deliver(it));
+      }
+
+      // Abriste sin señal: te quedas con la copia y nos conectamos cuando regrese
+      offlineBootRef.current = first === null;
+      if (first === null) return;
+      void flushOutbox(conversationId);
       void loadReactions();
       void markRead();
 
@@ -326,7 +404,9 @@ export default function Chat({
           }
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'stories' }, () => loadStoriesRef.current())
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'story_views' }, () => loadStoriesRef.current())
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'story_views' }, () =>
+          loadStoriesRef.current(),
+        )
         .on('broadcast', { event: 'typing' }, () => {
           setTyping(true);
           if (typingTimer.current) clearTimeout(typingTimer.current);
@@ -346,7 +426,9 @@ export default function Chat({
         setFatal(
           msg.startsWith('Faltan')
             ? 'Faltan las variables de Supabase en Netlify. Agrégalas (con "Builds" marcado) y vuelve a desplegar.'
-            : 'No pude cargar el chat. Revisa tu conexión.',
+            : isOnline()
+              ? 'No pude cargar el chat. Revisa tu conexión.'
+              : 'Sin conexión. Abre este chat una vez con internet para guardarlo en el cel.',
         );
         setReady(true);
       }
@@ -360,7 +442,35 @@ export default function Chat({
       if (channel) void sb().removeChannel(channel);
       channelRef.current = null;
     };
-  }, [sb, router, loadLatest, loadReactions, markRead, startRain]);
+  }, [sb, router, loadLatest, loadReactions, markRead, startRain, boot]);
+
+  // Regresó la señal después de abrir sin internet: conecta todo
+  const wasNetOn = useRef(true);
+  useEffect(() => {
+    const cameBack = netOn && !wasNetOn.current;
+    wasNetOn.current = netOn;
+    if (!cameBack) return;
+    if (offlineBootRef.current || meRef.current === null) {
+      offlineBootRef.current = false;
+      setFatal(null);
+      setBoot((b) => b + 1);
+    }
+  }, [netOn]);
+
+  // Copia local del chat para leerlo sin señal
+  useEffect(() => {
+    if (!ready || fatal) return;
+    const t = setTimeout(() => {
+      cacheSet(
+        `msgs:${conversationId}`,
+        msgs
+          .filter((m) => !m.local)
+          .slice(-80)
+          .map(({ local: _l, localUrl: _u, ...m }) => m),
+      );
+    }, 600);
+    return () => clearTimeout(t);
+  }, [msgs, ready, fatal, conversationId]);
 
   // Reloj para que los estados caduquen solos
   useEffect(() => {
@@ -466,25 +576,33 @@ export default function Chat({
     if (el.scrollTop < 80 && hasMore) void loadOlder();
   };
 
-  // ───────── Envío (optimista, con reintento) ─────────
-  const runSend = useCallback((optimistic: Msg, attempt: () => Promise<void>) => {
-    const id = optimistic.id;
-    const wrapped = async () => {
-      setMsgs((p) => p.map((m) => (m.id === id ? { ...m, local: 'pending' } : m)));
-      try {
-        await attempt();
-        setMsgs((p) => p.map((m) => (m.id === id ? { ...m, local: undefined } : m)));
-        retryRef.current.delete(id);
-        void notifyPartner(id);
-      } catch {
-        setMsgs((p) => p.map((m) => (m.id === id ? { ...m, local: 'failed' } : m)));
-      }
-    };
-    retryRef.current.set(id, wrapped);
-    stickRef.current = true;
-    setMsgs((p) => merge(p, [optimistic]));
-    void wrapped();
-  }, []);
+  // ───────── Envío (optimista; sin señal se queda en la bandeja y sale solo después) ─────────
+  const enqueue = useCallback(
+    (optimistic: Msg, make: () => Promise<OutDraft> | OutDraft) => {
+      if (!meId) return;
+      stickRef.current = true;
+      setMsgs((p) => merge(p, [optimistic]));
+      void (async () => {
+        let item: OutItem;
+        try {
+          item = {
+            id: optimistic.id,
+            uid: meId,
+            conv: conversationId,
+            created_at: optimistic.created_at,
+            ...(await make()),
+          };
+        } catch {
+          setMsgs((p) => p.map((m) => (m.id === optimistic.id ? { ...m, local: 'failed' } : m)));
+          return;
+        }
+        retryRef.current.set(item.id, () => deliver(item));
+        await outPut(item).catch(() => {});
+        await deliver(item);
+      })();
+    },
+    [meId, conversationId],
+  );
 
   const base = useCallback(
     (kind: Kind, extra: Partial<Msg>): Msg => {
@@ -510,38 +628,39 @@ export default function Chat({
     [meId, conversationId],
   );
 
-  const insertRow = useCallback(
-    async (row: Record<string, unknown>) => {
-      const { error } = await sb().from('messages').insert({ ...row, conversation_id: conversationId });
-      if (error && error.code !== '23505') throw error; // 23505 = ya estaba guardado
-    },
-    [sb, conversationId],
-  );
-
   const sendText = useCallback(
     (text: string) => {
       const m = base('text', { body: text });
-      runSend(m, () => insertRow({ id: m.id, kind: 'text', body: text, reply_to: m.reply_to }));
+      enqueue(m, () => ({
+        row: { id: m.id, kind: 'text', body: text, reply_to: m.reply_to },
+      }));
     },
-    [base, runSend, insertRow],
+    [base, enqueue],
   );
 
   const sendImage = useCallback(
     (file: File) => {
-      if (!meId) return;
-      const m = base('image', { localUrl: URL.createObjectURL(file), media_mime: 'image/jpeg' });
-      let path: string | undefined;
-      runSend(m, async () => {
-        if (!path) path = await uploadMedia(meId, await resizeImage(file), 'image/jpeg', 'jpg');
-        await insertRow({ id: m.id, kind: 'image', media_path: path, media_mime: 'image/jpeg', reply_to: m.reply_to });
+      const m = base('image', {
+        localUrl: URL.createObjectURL(file),
+        media_mime: 'image/jpeg',
       });
+      enqueue(m, async () => ({
+        row: {
+          id: m.id,
+          kind: 'image',
+          media_mime: 'image/jpeg',
+          reply_to: m.reply_to,
+        },
+        blob: await resizeImage(file),
+        mime: 'image/jpeg',
+        ext: 'jpg',
+      }));
     },
-    [base, meId, runSend, insertRow],
+    [base, enqueue],
   );
 
   const sendAudio = useCallback(
     (blob: Blob, mime: string, ext: string, durationMs: number, waveform: number[]) => {
-      if (!meId) return;
       const wave = waveform.length ? waveform : null;
       const m = base('audio', {
         localUrl: URL.createObjectURL(blob),
@@ -549,38 +668,40 @@ export default function Chat({
         duration_ms: durationMs,
         waveform: wave,
       });
-      let path: string | undefined;
-      runSend(m, async () => {
-        if (!path) path = await uploadMedia(meId, blob, mime, ext);
-        await insertRow({
+      enqueue(m, () => ({
+        row: {
           id: m.id,
           kind: 'audio',
-          media_path: path,
           media_mime: mime,
           duration_ms: durationMs,
           waveform: wave,
           reply_to: m.reply_to,
-        });
-      });
+        },
+        blob,
+        mime,
+        ext,
+      }));
     },
-    [base, meId, runSend, insertRow],
+    [base, enqueue],
   );
 
   const sendPing = useCallback(() => {
     if (Date.now() - lastPing.current < PING_COOLDOWN_MS) return;
     lastPing.current = Date.now();
     const m = base('ping', {});
-    runSend(m, () => insertRow({ id: m.id, kind: 'ping' }));
+    enqueue(m, () => ({ row: { id: m.id, kind: 'ping' } }));
     startRain();
-  }, [base, runSend, insertRow, startRain]);
+  }, [base, enqueue, startRain]);
 
   const sendQuick = useCallback(
     (q: QuickPick) => {
       const meta: MsgMeta = { type: q.type, emoji: q.emoji };
       const m = base('quick', { body: q.body, meta });
-      runSend(m, () => insertRow({ id: m.id, kind: 'quick', body: q.body, meta }));
+      enqueue(m, () => ({
+        row: { id: m.id, kind: 'quick', body: q.body, meta },
+      }));
     },
-    [base, runSend, insertRow],
+    [base, enqueue],
   );
 
   const createCapsule = useCallback(
@@ -606,7 +727,7 @@ export default function Chat({
         showToast('🎁 Cápsula guardada');
         void notifyPartner(id);
       } catch {
-        showToast('No se pudo guardar la cápsula');
+        showToast(isOnline() ? 'No se pudo guardar la cápsula' : 'Para la cápsula necesitas internet');
       }
     },
     [meId, conversationId, sb, showToast],
@@ -615,7 +736,12 @@ export default function Chat({
   const saveLook = useCallback(
     (theme: string, wall: string) => {
       setLook({ theme, wall });
-      void sb().rpc('set_conv_look', { p_conv: conversationId, p_theme: theme, p_wall: wall });
+      cacheSet(`look:${conversationId}`, { theme, wall });
+      void sb().rpc('set_conv_look', {
+        p_conv: conversationId,
+        p_theme: theme,
+        p_wall: wall,
+      });
     },
     [sb, conversationId],
   );
@@ -624,7 +750,11 @@ export default function Chat({
     const t = Date.now();
     if (t - lastTypingSent.current < 2500) return;
     lastTypingSent.current = t;
-    void channelRef.current?.send({ type: 'broadcast', event: 'typing', payload: {} });
+    void channelRef.current?.send({
+      type: 'broadcast',
+      event: 'typing',
+      payload: {},
+    });
   }, []);
 
   // ───────── Reacciones, borrar, estado ─────────
@@ -654,6 +784,7 @@ export default function Chat({
       setMsgs((p) => p.filter((x) => x.id !== m.id));
       if (m.local) {
         retryRef.current.delete(m.id);
+        void outDel(m.id).catch(() => {});
         return;
       }
       const { error } = await sb().from('messages').delete().eq('id', m.id);
@@ -700,25 +831,32 @@ export default function Chat({
     if (!sch.error && sch.data) setScheduled(sch.data as Scheduled[]);
   }, [sb]);
 
+  // Avisos de la bandeja de salida (enviado / sin señal / falló)
+  useEffect(
+    () =>
+      onOutbox((e) => {
+        if (e.conv !== conversationId) return;
+        setMsgs((p) => p.map((m) => (m.id === e.id ? { ...m, local: e.state === 'sent' ? undefined : e.state } : m)));
+        if (e.state === 'sent') {
+          retryRef.current.delete(e.id);
+          if (e.reminder) void loadPending();
+        }
+      }),
+    [conversationId, loadPending],
+  );
+
   const sendPromise = useCallback(
     (target: Msg, at: Date) => {
-      if (!meId) return;
       const body = `Te contesto ${formatWhen(at)}`;
       const meta: MsgMeta = { at: at.toISOString() };
       const m = base('promise', { body, meta, reply_to: target.id });
-      runSend(m, async () => {
-        await insertRow({ id: m.id, kind: 'promise', body, meta, reply_to: target.id });
-        // Para que yo también reciba el recordatorio de cumplirla
-        await sb()
-          .from('reminders')
-          .upsert(
-            { user_id: meId, message_id: m.id, remind_at: at.toISOString(), done: false, fired: 0, last_fired_at: null },
-            { onConflict: 'user_id,message_id' },
-          );
-        void loadPending();
-      });
+      // La promesa lleva su recordatorio para que no se te olvide cumplirla
+      enqueue(m, () => ({
+        row: { id: m.id, kind: 'promise', body, meta, reply_to: target.id },
+        reminderAt: at.toISOString(),
+      }));
     },
-    [base, meId, runSend, insertRow, sb, loadPending],
+    [base, enqueue],
   );
 
   useEffect(() => {
@@ -738,12 +876,17 @@ export default function Chat({
   const setReminder = useCallback(
     async (m: Msg, at: Date) => {
       if (!meId) return;
-      const { error } = await sb()
-        .from('reminders')
-        .upsert(
-          { user_id: meId, message_id: m.id, remind_at: at.toISOString(), done: false, fired: 0, last_fired_at: null },
-          { onConflict: 'user_id,message_id' },
-        );
+      const { error } = await sb().from('reminders').upsert(
+        {
+          user_id: meId,
+          message_id: m.id,
+          remind_at: at.toISOString(),
+          done: false,
+          fired: 0,
+          last_fired_at: null,
+        },
+        { onConflict: 'user_id,message_id' },
+      );
       if (error) {
         showToast('No se pudo guardar el recordatorio');
         return;
@@ -767,9 +910,12 @@ export default function Chat({
   const scheduleMessage = useCallback(
     async (text: string, at: Date) => {
       if (!meId) return;
-      const { error } = await sb()
-        .from('scheduled_messages')
-        .insert({ sender_id: meId, conversation_id: conversationId, body: text, send_at: at.toISOString() });
+      const { error } = await sb().from('scheduled_messages').insert({
+        sender_id: meId,
+        conversation_id: conversationId,
+        body: text,
+        send_at: at.toISOString(),
+      });
       if (error) {
         showToast('No se pudo programar el mensaje');
         return;
@@ -836,10 +982,13 @@ export default function Chat({
     if (expired.length) {
       const paths = expired.map((x) => x.media_path).filter((x): x is string => !!x);
       if (paths.length) await client.storage.from('media').remove(paths);
-      await client.from('stories').delete().in(
-        'id',
-        expired.map((x) => x.id),
-      );
+      await client
+        .from('stories')
+        .delete()
+        .in(
+          'id',
+          expired.map((x) => x.id),
+        );
     }
   }, [sb]);
 
@@ -867,7 +1016,9 @@ export default function Chat({
       showToast('Subiendo estado…');
       try {
         const media_path =
-          d.kind === 'image' ? await uploadMedia(meId, await resizeImage(d.file, 1440, 0.82), 'image/jpeg', 'jpg') : null;
+          d.kind === 'image'
+            ? await uploadMedia(meId, await resizeImage(d.file, 1440, 0.82), 'image/jpeg', 'jpg')
+            : null;
         const { data: created, error } = await sb()
           .from('stories')
           .insert({
@@ -911,7 +1062,14 @@ export default function Chat({
       setStoryViews((p) =>
         p.some((v) => v.story_id === id && v.viewer_id === meId)
           ? p
-          : [...p, { story_id: id, viewer_id: meId, seen_at: new Date().toISOString() }],
+          : [
+              ...p,
+              {
+                story_id: id,
+                viewer_id: meId,
+                seen_at: new Date().toISOString(),
+              },
+            ],
       );
       void sb()
         .from('story_views')
@@ -955,10 +1113,7 @@ export default function Chat({
 
   const liveStories = useMemo(() => stories.filter((x) => new Date(x.expires_at).getTime() > now), [stories, now]);
   const myStories = useMemo(() => liveStories.filter((x) => x.user_id === meId), [liveStories, meId]);
-  const partnerStories = useMemo(
-    () => liveStories.filter((x) => x.user_id === partnerId),
-    [liveStories, partnerId],
-  );
+  const partnerStories = useMemo(() => liveStories.filter((x) => x.user_id === partnerId), [liveStories, partnerId]);
   const seenByMe = useMemo(
     () => new Set(storyViews.filter((v) => v.viewer_id === meId).map((v) => v.story_id)),
     [storyViews, meId],
@@ -983,7 +1138,10 @@ export default function Chat({
       setEditMsg(null);
       if (text === cur.text) return;
       setMsgs((p) => p.map((m) => (m.id === cur.id ? { ...m, body: text, edited_at: new Date().toISOString() } : m)));
-      const { error } = await sb().rpc('edit_message', { p_id: cur.id, p_body: text });
+      const { error } = await sb().rpc('edit_message', {
+        p_id: cur.id,
+        p_body: text,
+      });
       if (error) {
         showToast('No se pudo editar (solo dentro de 24 h)');
         void fetchLatest();
@@ -1104,7 +1262,16 @@ export default function Chat({
       <header className="top">
         {onBack && (
           <button className="icon-btn back-btn" onClick={onBack} aria-label="Volver a mis chats">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              viewBox="0 0 24 24"
+              width="24"
+              height="24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <path d="M15 5l-7 7 7 7" />
             </svg>
           </button>
@@ -1117,7 +1284,11 @@ export default function Chat({
           ring={partnerStories.length ? (firstUnseenPartner >= 0 ? 'new' : 'seen') : null}
           label={partnerStories.length ? `Ver estado de ${partnerName}` : `Foto de ${partnerName}`}
           onClick={() => {
-            if (partnerStories.length) setViewer({ who: 'partner', index: Math.max(0, firstUnseenPartner) });
+            if (partnerStories.length)
+              setViewer({
+                who: 'partner',
+                index: Math.max(0, firstUnseenPartner),
+              });
             else if (partner?.avatar_path) void openPartnerPhoto();
           }}
         />
@@ -1169,7 +1340,8 @@ export default function Chat({
               </button>
             )}
             <button className="plain" onClick={() => setPendingOpen(true)}>
-              Pendientes{reminders.length + scheduled.length > 0 ? ` (${reminders.length + scheduled.length})` : ''}
+              Pendientes
+              {reminders.length + scheduled.length > 0 ? ` (${reminders.length + scheduled.length})` : ''}
             </button>
             <button
               className="plain"
@@ -1184,6 +1356,7 @@ export default function Chat({
           </div>
         )}
       </header>
+      {!netOn && <div className="offline-bar">Sin señal · se envía cuando regrese</div>}
 
       <div className="statusbar">
         {theirStatus ? (
@@ -1198,29 +1371,29 @@ export default function Chat({
           <div className="spill-spacer" />
         )}
         <div className="mine-group">
-        <Avatar
-          name={me?.display_name ?? 'Yo'}
-          path={me?.avatar_path}
-          size={34}
-          ring={myStories.length ? 'mine' : null}
-          plus={myStories.length === 0}
-          label={myStories.length ? 'Ver mi estado' : 'Subir estado'}
-          onClick={() => (myStories.length ? setViewer({ who: 'me', index: 0 }) : setComposeOpen(true))}
-        />
-        <button className={`spill mine ${myStatus ? 'set' : ''}`} onClick={() => setStatusOpen(true)}>
-          {myStatus ? (
-            <>
-              <span className="spill-emoji">{myStatus.emoji ?? '💬'}</span>
-              <span className="spill-text">{myStatus.text ?? 'Mi estado'}</span>
-              <span className="spill-edit">✎</span>
-            </>
-          ) : (
-            <>
-              <span className="spill-emoji">＋</span>
-              <span className="spill-text">Mi estado</span>
-            </>
-          )}
-        </button>
+          <Avatar
+            name={me?.display_name ?? 'Yo'}
+            path={me?.avatar_path}
+            size={34}
+            ring={myStories.length ? 'mine' : null}
+            plus={myStories.length === 0}
+            label={myStories.length ? 'Ver mi estado' : 'Subir estado'}
+            onClick={() => (myStories.length ? setViewer({ who: 'me', index: 0 }) : setComposeOpen(true))}
+          />
+          <button className={`spill mine ${myStatus ? 'set' : ''}`} onClick={() => setStatusOpen(true)}>
+            {myStatus ? (
+              <>
+                <span className="spill-emoji">{myStatus.emoji ?? '💬'}</span>
+                <span className="spill-text">{myStatus.text ?? 'Mi estado'}</span>
+                <span className="spill-edit">✎</span>
+              </>
+            ) : (
+              <>
+                <span className="spill-emoji">＋</span>
+                <span className="spill-text">Mi estado</span>
+              </>
+            )}
+          </button>
         </div>
       </div>
 
@@ -1300,7 +1473,14 @@ export default function Chat({
       )}
 
       <Composer
-        reply={replyTo ? { name: replyTo.sender_id === meId ? 'ti' : partnerName, text: snippet(replyTo) } : null}
+        reply={
+          replyTo
+            ? {
+                name: replyTo.sender_id === meId ? 'ti' : partnerName,
+                text: snippet(replyTo),
+              }
+            : null
+        }
         onCancelReply={() => setReplyTo(null)}
         onSendText={sendText}
         editing={editMsg}
@@ -1348,11 +1528,7 @@ export default function Chat({
       )}
 
       {quickOpen && (
-        <QuickSheet
-          onSend={sendQuick}
-          onCapsule={() => setCapsuleOpen(true)}
-          onClose={() => setQuickOpen(false)}
-        />
+        <QuickSheet onSend={sendQuick} onCapsule={() => setCapsuleOpen(true)} onClose={() => setQuickOpen(false)} />
       )}
 
       {capsuleOpen && (
@@ -1388,7 +1564,11 @@ export default function Chat({
       )}
 
       {galleryOpen && (
-        <GallerySheet conversationId={conversationId} onOpen={(url) => setLightbox(url)} onClose={() => setGalleryOpen(false)} />
+        <GallerySheet
+          conversationId={conversationId}
+          onOpen={(url) => setLightbox(url)}
+          onClose={() => setGalleryOpen(false)}
+        />
       )}
 
       {composeOpen && <StoryComposer onPublish={(d) => void publishStory(d)} onClose={() => setComposeOpen(false)} />}
@@ -1459,7 +1639,14 @@ export default function Chat({
       {rain && (
         <div className="hearts" aria-hidden>
           {rain.map((h, i) => (
-            <span key={i} style={{ left: `${h.l}%`, animationDelay: `${h.d}s`, fontSize: h.s }}>
+            <span
+              key={i}
+              style={{
+                left: `${h.l}%`,
+                animationDelay: `${h.d}s`,
+                fontSize: h.s,
+              }}
+            >
               💜
             </span>
           ))}
