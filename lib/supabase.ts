@@ -39,7 +39,11 @@ export type Member = {
   status_emoji: string | null;
   status_text: string | null;
   status_until: string | null;
+  nudges_on?: boolean;
 };
+
+export type Reminder = { id: string; message_id: string; remind_at: string };
+export type Scheduled = { id: string; body: string; send_at: string };
 
 export type Reaction = { message_id: string; user_id: string; emoji: string };
 

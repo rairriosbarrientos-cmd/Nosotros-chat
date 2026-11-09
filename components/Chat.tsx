@@ -7,6 +7,8 @@ import ActionSheet from './ActionSheet';
 import Bubble, { type Msg } from './Bubble';
 import Composer from './Composer';
 import StatusSheet from './StatusSheet';
+import TimeSheet from './TimeSheet';
+import PendingSheet from './PendingSheet';
 import { formatUntil, snippet } from '@/lib/emoji';
 import { resizeImage, uploadMedia } from '@/lib/media';
 import {
@@ -26,6 +28,8 @@ import {
   type Kind,
   type Member,
   type Message,
+  type Reminder,
+  type Scheduled,
   type Reaction,
 } from '@/lib/supabase';
 
@@ -78,6 +82,10 @@ export default function Chat() {
   const [replyTo, setReplyTo] = useState<Msg | null>(null);
   const [actionMsg, setActionMsg] = useState<Msg | null>(null);
   const [statusOpen, setStatusOpen] = useState(false);
+  const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [scheduled, setScheduled] = useState<Scheduled[]>([]);
+  const [remindMsg, setRemindMsg] = useState<Msg | null>(null);
+  const [pendingOpen, setPendingOpen] = useState(false);
   const [flashId, setFlashId] = useState<string | null>(null);
   const [firstUnreadId, setFirstUnreadId] = useState<string | null>(null);
   const [rain, setRain] = useState<Heart[] | null>(null);
@@ -184,7 +192,7 @@ export default function Chat() {
 
       const { data: members, error } = await client
         .from('members')
-        .select('user_id, display_name, status_emoji, status_text, status_until');
+        .select('user_id, display_name, status_emoji, status_text, status_until, nudges_on');
       if (cancelled) return;
       const mine = (members as Member[] | null)?.find((m) => m.user_id === uid);
       if (error || !mine) {
@@ -563,6 +571,104 @@ export default function Chat() {
     [sb, showToast],
   );
 
+  const loadPending = useCallback(async () => {
+    const client = sb();
+    const [rem, sch] = await Promise.all([
+      client.from('reminders').select('id, message_id, remind_at').eq('done', false).order('remind_at'),
+      client.from('scheduled_messages').select('id, body, send_at').eq('status', 'pending').order('send_at'),
+    ]);
+    if (!rem.error && rem.data) setReminders(rem.data as Reminder[]);
+    if (!sch.error && sch.data) setScheduled(sch.data as Scheduled[]);
+  }, [sb]);
+
+  useEffect(() => {
+    if (!meId) return;
+    void loadPending();
+    const t = setInterval(() => void loadPending(), 45_000);
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void loadPending();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [meId, loadPending]);
+
+  const setReminder = useCallback(
+    async (m: Msg, at: Date) => {
+      if (!meId) return;
+      const { error } = await sb()
+        .from('reminders')
+        .upsert(
+          { user_id: meId, message_id: m.id, remind_at: at.toISOString(), done: false, fired: 0, last_fired_at: null },
+          { onConflict: 'user_id,message_id' },
+        );
+      if (error) {
+        showToast('No se pudo guardar el recordatorio');
+        return;
+      }
+      showToast('⏰ Listo, te lo recuerdo');
+      void loadPending();
+    },
+    [meId, sb, showToast, loadPending],
+  );
+
+  const removeReminder = useCallback(
+    async (id: string) => {
+      setReminders((p) => p.filter((r) => r.id !== id));
+      const { error } = await sb().from('reminders').delete().eq('id', id);
+      if (error) showToast('No se pudo quitar');
+      void loadPending();
+    },
+    [sb, showToast, loadPending],
+  );
+
+  const scheduleMessage = useCallback(
+    async (text: string, at: Date) => {
+      if (!meId) return;
+      const { error } = await sb()
+        .from('scheduled_messages')
+        .insert({ sender_id: meId, body: text, send_at: at.toISOString() });
+      if (error) {
+        showToast('No se pudo programar el mensaje');
+        return;
+      }
+      showToast('🕒 Mensaje programado');
+      void loadPending();
+    },
+    [meId, sb, showToast, loadPending],
+  );
+
+  const cancelScheduled = useCallback(
+    async (id: string) => {
+      setScheduled((p) => p.filter((x) => x.id !== id));
+      const { error } = await sb().from('scheduled_messages').update({ status: 'canceled' }).eq('id', id);
+      if (error) showToast('No se pudo cancelar');
+      void loadPending();
+    },
+    [sb, showToast, loadPending],
+  );
+
+  const toggleNudges = useCallback(async () => {
+    const cur = meRef.current;
+    if (!cur) return;
+    const next = !cur.nudges_on;
+    const updated = { ...cur, nudges_on: next };
+    meRef.current = updated;
+    setMe(updated);
+    const { error } = await sb().rpc('set_prefs', { p_nudges: next });
+    if (error) {
+      meRef.current = cur;
+      setMe(cur);
+      showToast('No se pudo cambiar');
+      return;
+    }
+    showToast(next ? '🔔 Te insistiré si no contestas' : '🔕 Sin insistencia');
+  }, [sb, showToast]);
+
+  const remindedIds = useMemo(() => new Set(reminders.map((r) => r.message_id)), [reminders]);
+
   const jumpTo = useCallback((id: string) => {
     const el = document.getElementById(`msg-${id}`);
     if (!el) return;
@@ -678,6 +784,18 @@ export default function Chat() {
             >
               Mi estado
             </button>
+            <button className="plain" onClick={() => setPendingOpen(true)}>
+              Pendientes{reminders.length + scheduled.length > 0 ? ` (${reminders.length + scheduled.length})` : ''}
+            </button>
+            <button
+              className="plain"
+              onClick={(e) => {
+                e.stopPropagation();
+                void toggleNudges();
+              }}
+            >
+              Insistente: {me?.nudges_on ? 'activado 🔔' : 'apagado'}
+            </button>
             <button onClick={signOut}>Cerrar sesión</button>
           </div>
         )}
@@ -764,6 +882,7 @@ export default function Chat() {
               replied={m.reply_to ? (msgById.get(m.reply_to) ?? null) : null}
               reactions={reactionsByMsg.get(m.id) ?? []}
               flash={flashId === m.id}
+              reminded={remindedIds.has(m.id)}
               onRetry={(id) => void retryRef.current.get(id)?.()}
               onReply={setReplyTo}
               onActions={setActionMsg}
@@ -788,6 +907,7 @@ export default function Chat() {
         reply={replyTo ? { name: replyTo.sender_id === meId ? 'ti' : partnerName, text: snippet(replyTo) } : null}
         onCancelReply={() => setReplyTo(null)}
         onSendText={sendText}
+        onSchedule={(t, at) => void scheduleMessage(t, at)}
         onSendImage={sendImage}
         onSendAudio={sendAudio}
         onTyping={onTyping}
@@ -800,11 +920,42 @@ export default function Chat() {
           myReaction={reactions.find((r) => r.message_id === actionMsg.id && r.user_id === meId)?.emoji ?? null}
           onClose={() => setActionMsg(null)}
           onReact={(emoji) => void toggleReaction(actionMsg, emoji)}
+          reminded={remindedIds.has(actionMsg.id)}
+          onRemind={() => setRemindMsg(actionMsg)}
+          onUnremind={() => {
+            const r = reminders.find((x) => x.message_id === actionMsg.id);
+            if (r) void removeReminder(r.id);
+          }}
           onReply={() => setReplyTo(actionMsg)}
           onCopy={() => {
             if (actionMsg.body) void navigator.clipboard?.writeText(actionMsg.body).catch(() => {});
           }}
           onDelete={() => void deleteMsg(actionMsg)}
+        />
+      )}
+
+      {remindMsg && (
+        <TimeSheet
+          title="Recordármelo"
+          sub={`"${snippet(remindMsg)}"`}
+          confirmLabel="Recordarme"
+          onClose={() => setRemindMsg(null)}
+          onPick={(at) => void setReminder(remindMsg, at)}
+        />
+      )}
+
+      {pendingOpen && (
+        <PendingSheet
+          scheduled={scheduled}
+          reminders={reminders}
+          reminderText={(id) => {
+            const m = msgById.get(id);
+            return m ? snippet(m) : 'Mensaje';
+          }}
+          onCancelScheduled={(id) => void cancelScheduled(id)}
+          onCancelReminder={(id) => void removeReminder(id)}
+          onJump={jumpTo}
+          onClose={() => setPendingOpen(false)}
         />
       )}
 

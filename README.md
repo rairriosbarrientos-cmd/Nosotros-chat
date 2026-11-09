@@ -38,6 +38,12 @@ PWA (Next.js 16 + Supabase) solo para ustedes dos.
 - [ ] Estado: ponlo en un cel y verifica que sale en el otro.
 - [ ] Modo avión → mandar → "Reintentar" al reconectar.
 
+## Recordatorios, mensajes programados y modo insistente
+- **Recordármelo**: mantén presionado un mensaje → ⏰ Recordármelo. Te llega un push a la hora elegida (se repite cada 30 min, hasta 4 veces, si tienes el modo insistente; se detiene en cuanto contestas).
+- **Programar**: escribe un mensaje y toca el reloj junto al botón de enviar. Se manda solo, con la app cerrada.
+- **Insistente** (menú ⋮): si el último mensaje es de la otra persona y no contestas, te empuja a los 30 min, 2 h, 6 h y 24 h. Silencio de 12 a 8 am (hora de México). Es opt-in por persona.
+- Todo corre en Supabase (`supabase/v3_pendientes.sql`, pg_cron cada minuto) y avisa a `/api/push-due`, protegido con `CRON_SECRET` (variable de Netlify, igual al valor de `private_config.cron_secret`). El interruptor `private_config.push_enabled` debe estar en `'true'`.
+
 ## Seguridad
 - RLS: solo quien esté en `members` lee o escribe. Solo puedes borrar lo tuyo; nadie edita mensajes.
 - Bucket `media` privado con URLs firmadas de 1 h.

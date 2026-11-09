@@ -1225,3 +1225,57 @@ button {
     transition: none !important;
   }
 }
+
+/* ───────── Recordatorios y programados ───────── */
+.rem-mark {
+  font-size: 11px;
+}
+.sched-btn {
+  color: var(--mut);
+}
+.sheet-sub.when {
+  margin: -4px 0 12px;
+  color: var(--txt);
+  font-weight: 600;
+}
+.sheet-sub.when.bad {
+  color: var(--red);
+}
+.status-input input[type='datetime-local'] {
+  color-scheme: dark;
+  min-height: 48px;
+}
+.pending-empty {
+  color: var(--mut);
+  text-align: center;
+  padding: 18px 0 8px;
+}
+.pending-h {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--mut);
+  margin: 12px 4px 6px;
+}
+.pending-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 4px;
+  border-top: 1px solid var(--line);
+}
+.pending-main {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+.pending-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 15px;
+}
+.pending-when {
+  color: var(--mut);
+  font-size: 13px;
+  margin-top: 2px;
+}

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatDuration, pickAudioMime } from '@/lib/media';
+import TimeSheet from './TimeSheet';
 
 const MAX_RECORD_MS = 5 * 60_000;
 const MIN_RECORD_MS = 800;
@@ -13,6 +14,7 @@ type Props = {
   reply: { name: string; text: string } | null;
   onCancelReply: () => void;
   onSendText: (text: string) => void;
+  onSchedule: (text: string, at: Date) => void;
   onSendImage: (file: File) => void;
   onSendAudio: (blob: Blob, mime: string, ext: string, durationMs: number, waveform: number[]) => void;
   onTyping: () => void;
@@ -33,12 +35,13 @@ function toWaveform(samples: number[]): number[] {
   return out.map((v) => Math.round(Math.max(10, (v / max) * 100)));
 }
 
-export default function Composer({ reply, onCancelReply, onSendText, onSendImage, onSendAudio, onTyping }: Props) {
+export default function Composer({ reply, onCancelReply, onSendText, onSchedule, onSendImage, onSendAudio, onTyping }: Props) {
   const [text, setText] = useState('');
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [live, setLive] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [timeOpen, setTimeOpen] = useState(false);
 
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -254,9 +257,17 @@ export default function Composer({ reply, onCancelReply, onSendText, onSendImage
           }}
         />
         {text.trim() ? (
-          <button className="send-btn" onClick={submit} aria-label="Enviar">
-            <SendIcon />
-          </button>
+          <>
+            <button className="icon-btn sched-btn" onClick={() => setTimeOpen(true)} aria-label="Programar mensaje">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="8.5" />
+                <path d="M12 7.5V12l3 2" />
+              </svg>
+            </button>
+            <button className="send-btn" onClick={submit} aria-label="Enviar">
+              <SendIcon />
+            </button>
+          </>
         ) : (
           <button className="send-btn mic" onClick={startRecording} aria-label="Grabar nota de voz">
             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -266,6 +277,19 @@ export default function Composer({ reply, onCancelReply, onSendText, onSendImage
           </button>
         )}
       </div>
+      {timeOpen && (
+        <TimeSheet
+          title="Programar mensaje"
+          sub="Se enviará solo a la hora que elijas, aunque tengas la app cerrada."
+          confirmLabel="Programar"
+          onClose={() => setTimeOpen(false)}
+          onPick={(at) => {
+            onSchedule(text.trim(), at);
+            setText('');
+            requestAnimationFrame(resize);
+          }}
+        />
+      )}
     </div>
   );
 }

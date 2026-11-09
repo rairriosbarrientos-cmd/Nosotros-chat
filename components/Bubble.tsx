@@ -49,6 +49,7 @@ type Props = {
   replied: Msg | null;
   reactions: Reaction[];
   flash: boolean;
+  reminded?: boolean;
   onRetry: (id: string) => void;
   onReply: (m: Msg) => void;
   onActions: (m: Msg) => void;
@@ -245,6 +246,7 @@ export default function Bubble(p: Props) {
         )}
 
         <span className={`meta ${isImage ? 'meta-over' : ''}`}>
+          {p.reminded && <span className="rem-mark" aria-label="Con recordatorio">⏰ </span>}
           {time(msg.created_at)}
           {mine && <Ticks msg={msg} />}
         </span>

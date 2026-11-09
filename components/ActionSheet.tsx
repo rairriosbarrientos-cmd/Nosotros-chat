@@ -10,18 +10,24 @@ export default function ActionSheet({
   msg,
   mine,
   myReaction,
+  reminded,
   onClose,
   onReact,
   onReply,
+  onRemind,
+  onUnremind,
   onCopy,
   onDelete,
 }: {
   msg: Msg;
   mine: boolean;
   myReaction: string | null;
+  reminded: boolean;
   onClose: () => void;
   onReact: (emoji: string) => void;
   onReply: () => void;
+  onRemind: () => void;
+  onUnremind: () => void;
   onCopy: () => void;
   onDelete: () => void;
 }) {
@@ -55,6 +61,26 @@ export default function ActionSheet({
           >
             <span>↩️</span> Responder
           </button>
+          {msg.kind !== 'ping' &&
+            (reminded ? (
+              <button
+                onClick={() => {
+                  onUnremind();
+                  onClose();
+                }}
+              >
+                <span>🔕</span> Quitar recordatorio
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  onRemind();
+                  onClose();
+                }}
+              >
+                <span>⏰</span> Recordármelo
+              </button>
+            ))}
           {msg.kind === 'text' && (
             <button
               onClick={() => {
