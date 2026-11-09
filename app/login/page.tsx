@@ -13,11 +13,15 @@ export default function LoginPage() {
 
   // Si ya hay sesión, directo al chat
   useEffect(() => {
-    void supabaseBrowser()
-      .auth.getSession()
-      .then(({ data }) => {
-        if (data.session) router.replace('/');
-      });
+    try {
+      void supabaseBrowser()
+        .auth.getSession()
+        .then(({ data }) => {
+          if (data.session) router.replace('/');
+        });
+    } catch {
+      setError('Faltan las variables de Supabase en Netlify. Agrégalas y vuelve a desplegar.');
+    }
   }, [router]);
 
   const submit = async (e: FormEvent) => {
@@ -25,11 +29,15 @@ export default function LoginPage() {
     if (busy) return;
     setBusy(true);
     setError(null);
-    const { error } = await supabaseBrowser().auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
-    if (error) {
+    let result;
+    try {
+      result = await supabaseBrowser().auth.signInWithPassword({ email: email.trim(), password });
+    } catch {
+      setError('Faltan las variables de Supabase en Netlify. Agrégalas y vuelve a desplegar.');
+      setBusy(false);
+      return;
+    }
+    if (result.error) {
       setError('Correo o contraseña incorrectos');
       setBusy(false);
       return;

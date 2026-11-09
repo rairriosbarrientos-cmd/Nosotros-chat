@@ -263,9 +263,14 @@ export default function Chat() {
           if (status === 'SUBSCRIBED') await channel?.track({ at: Date.now() });
         });
       channelRef.current = channel;
-    })().catch(() => {
+    })().catch((e: unknown) => {
       if (!cancelled) {
-        setFatal('No pude cargar el chat. Revisa tu conexión.');
+        const msg = e instanceof Error ? e.message : '';
+        setFatal(
+          msg.startsWith('Faltan')
+            ? 'Faltan las variables de Supabase en Netlify. Agrégalas (con "Builds" marcado) y vuelve a desplegar.'
+            : 'No pude cargar el chat. Revisa tu conexión.',
+        );
         setReady(true);
       }
     });
